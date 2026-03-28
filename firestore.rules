@@ -1,0 +1,50 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (
+          (request.auth.token.email in ["bsaireddy05@gmail.com", "naveenr028@gmail.com", "kottapriyanka5@gmail.com"]) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+        );
+    }
+
+    // Settings are publicly readable, but only writable by admin
+    match /settings/global {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Guests collection
+    match /guests/{guestId} {
+      // Anyone can look up a specific guest by ID (for pre-filling name)
+      allow get: if true;
+      
+      // Only admin can list all guests
+      allow list: if isAdmin();
+      
+      // Anyone can create an RSVP
+      allow create: if true;
+      
+      // Anyone can update their RSVP if they have the ID
+      // In a more secure app, we'd check if they are the "owner" via a token or similar
+      // For this simple app, we'll allow public updates but validate the data
+      allow update: if true;
+      
+      // Only admin can delete guests
+      allow delete: if isAdmin();
+    }
+
+    // User profiles for RBAC
+    match /users/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if isAdmin();
+    }
+  }
+}

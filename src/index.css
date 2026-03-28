@@ -1,0 +1,226 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-serif: "Cormorant Garamond", Georgia, serif;
+  
+  --color-brand: #d8a033;
+  --color-surface: #f5ead9;
+  --color-card: rgba(255, 247, 232, 0.92);
+  
+  --radius-card: 24px;
+  --radius-button: 12px;
+  
+  --shadow-apple: 0 12px 30px rgba(57, 26, 12, 0.14);
+  --shadow-apple-hover: 0 20px 48px rgba(57, 26, 12, 0.2);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 20px;
+  }
+  body {
+    @apply bg-surface text-[#2f1b12] antialiased selection:bg-brand/20;
+  }
+}
+
+.safe-area-bottom {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+}
+
+.apple-card {
+  @apply bg-card rounded-card shadow-apple transition-all duration-300 hover:shadow-apple-hover;
+}
+
+.apple-button {
+  @apply rounded-button px-6 py-3 font-semibold transition-all active:scale-95 disabled:opacity-50;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.ceremony-shell {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255, 248, 234, 0.9), rgba(244, 229, 199, 0.82)),
+    url("/mandala-background.jpg") center top / cover fixed no-repeat;
+}
+
+.ceremony-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.18;
+  background-image:
+    radial-gradient(circle at 24px 24px, rgba(255, 228, 181, 0.22) 2px, transparent 2.5px),
+    linear-gradient(rgba(255, 209, 122, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 209, 122, 0.04) 1px, transparent 1px);
+  background-size: 48px 48px, 24px 24px, 24px 24px;
+}
+
+.ceremony-panel {
+  background: linear-gradient(180deg, rgba(255, 244, 226, 0.94), rgba(245, 230, 205, 0.9));
+  border: 1px solid rgba(232, 194, 118, 0.35);
+  box-shadow: 0 18px 40px rgba(38, 18, 10, 0.18);
+}
+
+.garland {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 92px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.garland::before {
+  content: "";
+  position: absolute;
+  inset: 6px 0 auto;
+  height: 28px;
+  background:
+    radial-gradient(circle at 14px 14px, #f6bd2a 0 6px, transparent 6.5px) 0 0 / 40px 28px repeat-x,
+    linear-gradient(180deg, transparent 0 14px, #6d8528 14px 18px, transparent 18px 100%) 0 0 / 40px 28px repeat-x;
+}
+
+.garland::after {
+  content: "";
+  position: absolute;
+  inset: 24px 0 auto;
+  height: 24px;
+  background:
+    radial-gradient(circle at 20px 0, transparent 18px, #6d8528 18px 21px, transparent 21px) 0 0 / 40px 24px repeat-x;
+  opacity: 0.9;
+}
+
+.hanger {
+  position: absolute;
+  top: 72px;
+  width: 88px;
+  height: 220px;
+  pointer-events: none;
+  opacity: 0.72;
+}
+
+.hanger::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 2px;
+  height: 92px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, rgba(255, 225, 170, 0.2), rgba(255, 225, 170, 0.78));
+}
+
+.hanger::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 90px;
+  width: 62px;
+  height: 62px;
+  transform: translateX(-50%) rotate(45deg);
+  border: 1px solid rgba(255, 229, 199, 0.36);
+  box-shadow:
+    0 0 0 10px rgba(255, 229, 199, 0.06),
+    0 0 0 20px rgba(255, 229, 199, 0.04);
+}
+
+.hanger-left {
+  left: max(12px, calc(50% - 40rem));
+}
+
+.hanger-right {
+  right: max(12px, calc(50% - 40rem));
+}
+
+.lamp {
+  position: absolute;
+  top: 70px;
+  width: 120px;
+  height: 240px;
+  pointer-events: none;
+}
+
+.lamp::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 2px;
+  height: 86px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, rgba(255, 210, 135, 0.25), rgba(255, 210, 135, 0.88));
+}
+
+.lamp::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 84px;
+  width: 56px;
+  height: 72px;
+  transform: translateX(-50%);
+  border-radius: 50% 50% 44% 44%;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(255, 244, 184, 0.9), rgba(255, 244, 184, 0) 45%),
+    linear-gradient(180deg, #d9a442 0%, #9a681e 100%);
+  clip-path: polygon(18% 12%, 82% 12%, 100% 54%, 74% 90%, 26% 90%, 0 54%);
+  box-shadow: 0 8px 24px rgba(255, 185, 70, 0.2);
+}
+
+.lamp-left {
+  left: max(0px, calc(50% - 48rem));
+}
+
+.lamp-right {
+  right: max(0px, calc(50% - 48rem));
+}
+
+.rangoli {
+  position: absolute;
+  width: 124px;
+  height: 124px;
+  pointer-events: none;
+  opacity: 0.42;
+  background:
+    radial-gradient(circle at center, rgba(255, 243, 220, 0.9) 0 2px, transparent 2.5px),
+    radial-gradient(circle at 50% 16px, transparent 0 8px, rgba(255, 243, 220, 0.75) 8px 9px, transparent 9px),
+    radial-gradient(circle at 108px 50%, transparent 0 8px, rgba(255, 243, 220, 0.75) 8px 9px, transparent 9px),
+    radial-gradient(circle at 50% 108px, transparent 0 8px, rgba(255, 243, 220, 0.75) 8px 9px, transparent 9px),
+    radial-gradient(circle at 16px 50%, transparent 0 8px, rgba(255, 243, 220, 0.75) 8px 9px, transparent 9px);
+}
+
+.rangoli::before,
+.rangoli::after {
+  content: "";
+  position: absolute;
+  inset: 18px;
+  border: 1px solid rgba(255, 243, 220, 0.7);
+  transform: rotate(45deg);
+}
+
+.rangoli::after {
+  inset: 36px;
+}
+
+@media (max-width: 900px) {
+  .lamp,
+  .hanger {
+    display: none;
+  }
+
+  .ceremony-shell {
+    background:
+      linear-gradient(180deg, rgba(255, 248, 234, 0.92), rgba(244, 229, 199, 0.84)),
+      url("/mandala-background.jpg") center top / cover no-repeat;
+  }
+}

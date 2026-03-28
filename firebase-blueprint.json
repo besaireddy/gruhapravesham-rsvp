@@ -1,0 +1,70 @@
+{
+  "entities": {
+    "Guest": {
+      "title": "Guest",
+      "description": "A guest invited to the housewarming event.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "status": { "type": "string", "enum": ["attending", "maybe", "declined", "pending"] },
+        "adults": { "type": "integer" },
+        "children": { "type": "integer" },
+        "message": { "type": "string" },
+        "invited": { "type": "boolean" },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "status"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Global application settings and event details.",
+      "type": "object",
+      "properties": {
+        "welcomeMessage": { "type": "string" },
+        "eventDate": { "type": "string" },
+        "schedule": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "time": { "type": "string" },
+              "event": { "type": "string" }
+            }
+          }
+        },
+        "dressCode": { "type": "string" },
+        "hostName": { "type": "string" },
+        "hostPhone": { "type": "string" },
+        "address": { "type": "string" },
+        "adminPin": { "type": "string" }
+      }
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile for RBAC.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] }
+      },
+      "required": ["uid", "email", "role"]
+    }
+  },
+  "firestore": {
+    "/guests/{guestId}": {
+      "schema": "Guest",
+      "description": "Collection of guests."
+    },
+    "/settings/global": {
+      "schema": "Settings",
+      "description": "Global settings for the app."
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles."
+    }
+  }
+}

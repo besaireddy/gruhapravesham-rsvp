@@ -1,0 +1,5 @@
+{
+  "name": "Housewarming RSVP",
+  "description": "A mobile-friendly RSVP app for housewarming events with guest management and event details.",
+  "requestFramePermissions": ["geolocation"]
+}
