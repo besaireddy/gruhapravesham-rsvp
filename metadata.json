@@ -1,5 +1,5 @@
 {
   "name": "Housewarming RSVP",
-  "description": "A mobile-friendly RSVP app for housewarming events with guest management and event details.",
+  "description": "A mobile-friendly Gruhapravesham RSVP app with guest management, event details, and admin workflows.",
   "requestFramePermissions": ["geolocation"]
 }
