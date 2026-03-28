@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapPin, Calendar, Clock, Phone, User, Users, MessageSquare, Plus, Minus, Check, LogIn } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
-import { collection, addDoc, serverTimestamp, getDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDoc, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
+import { formatCalendarDate, formatDateForGoogleCalendar, parseConfiguredEventDate } from '../lib/eventUtils';
+import { findDuplicateGuestByName, formatDisplayUsPhoneNumber, normalizeGuestName, validateRsvpSubmission } from '../lib/guestUtils';
 
 export default function LandingPage() {
   const { settings, loading } = useSettings();
@@ -21,88 +23,52 @@ export default function LandingPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [guestRecordFound, setGuestRecordFound] = useState(!guestId);
   const [hasExistingRsvp, setHasExistingRsvp] = useState(false);
+  const [submissionError, setSubmissionError] = useState('');
 
-  const formatPhoneNumber = (value: string) => {
-    const digits = value.replace(/\D/g, '');
-    if (digits.length === 10) {
-      return `+1 (${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-    }
-    return value;
-  };
-
-  const getEventDate = () => {
-    const monthMap: Record<string, number> = {
-      january: 0,
-      february: 1,
-      march: 2,
-      april: 3,
-      may: 4,
-      june: 5,
-      july: 6,
-      august: 7,
-      september: 8,
-      october: 9,
-      november: 10,
-      december: 11
-    };
-
-    const raw = settings.eventDate.toLowerCase();
-    const monthEntry = Object.entries(monthMap).find(([name]) => raw.includes(name));
-    const dayMatch = raw.match(/(\d{1,2})(st|nd|rd|th)?/);
-
-    if (!monthEntry || !dayMatch) {
-      return new Date('2026-04-26T05:00:00');
-    }
-
-    const [, monthIndex] = monthEntry;
-    const day = Number(dayMatch[1]);
-    return new Date(2026, monthIndex, day, 5, 0, 0);
-  };
-
-  const formatCalendarDate = (date: Date) => {
-    return new Intl.DateTimeFormat('en-US', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    }).format(date);
-  };
-
-  const eventStart = getEventDate();
-  const eventEnd = new Date(eventStart.getTime() + 8 * 60 * 60 * 1000);
-  const formatForCalendar = (date: Date) => {
-    const pad = (value: number) => String(value).padStart(2, '0');
-    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}00`;
-  };
-  const addToCalendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(settings.heroSubtitle || settings.heroTitle)}&dates=${formatForCalendar(eventStart)}/${formatForCalendar(eventEnd)}&details=${encodeURIComponent(settings.welcomeMessage)}&location=${encodeURIComponent(settings.address)}`;
-  const directionsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(settings.address)}`;
-  const formattedPhone = formatPhoneNumber(settings.hostPhone);
+  const eventStart = useMemo(() => parseConfiguredEventDate(settings.eventDate, 2026), [settings.eventDate]);
+  const eventEnd = useMemo(() => new Date(eventStart.getTime() + 8 * 60 * 60 * 1000), [eventStart]);
+  const addToCalendarUrl = useMemo(
+    () => `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(settings.heroSubtitle || settings.heroTitle)}&dates=${formatDateForGoogleCalendar(eventStart)}/${formatDateForGoogleCalendar(eventEnd)}&details=${encodeURIComponent(settings.welcomeMessage)}&location=${encodeURIComponent(settings.address)}`,
+    [eventEnd, eventStart, settings.address, settings.heroSubtitle, settings.heroTitle, settings.welcomeMessage]
+  );
+  const directionsUrl = useMemo(() => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(settings.address)}`, [settings.address]);
+  const formattedPhone = useMemo(() => formatDisplayUsPhoneNumber(settings.hostPhone), [settings.hostPhone]);
 
   useEffect(() => {
     if (guestId) {
+      let cancelled = false;
       const fetchGuest = async () => {
         try {
           const guestDoc = await getDoc(doc(db, 'guests', guestId));
-            if (guestDoc.exists()) {
-              const guestData = guestDoc.data();
-              setGuestRecordFound(true);
-              setName(guestData.name || '');
-              if (guestData.status && guestData.status !== 'pending') {
-                setRsvpStatus(guestData.status === 'declined' ? 'declined' : 'attending');
-                setAdults(Math.max(guestData.adults ?? 1, 1));
-                setChildren(Math.max(guestData.children ?? 0, 0));
-                setMessage(guestData.message || '');
-                setHasExistingRsvp(true);
-                setIsSubmitted(true);
-              }
-            } else {
-              setGuestRecordFound(false);
+          if (cancelled) return;
+
+          if (guestDoc.exists()) {
+            const guestData = guestDoc.data();
+            setGuestRecordFound(true);
+            setName(guestData.name || '');
+            if (guestData.status && guestData.status !== 'pending') {
+              setRsvpStatus(guestData.status === 'declined' ? 'declined' : 'attending');
+              setAdults(Math.max(guestData.adults ?? 1, 1));
+              setChildren(Math.max(guestData.children ?? 0, 0));
+              setMessage(guestData.message || '');
+              setHasExistingRsvp(true);
+              setIsSubmitted(true);
             }
+          } else {
+            setGuestRecordFound(false);
+          }
         } catch (error) {
           handleFirestoreError(error, OperationType.GET, `guests/${guestId}`);
+          if (!cancelled) {
+            setGuestRecordFound(false);
+            setSubmissionError('We couldn’t load this RSVP link right now. Please try again in a moment.');
+          }
         }
       };
       fetchGuest();
+      return () => {
+        cancelled = true;
+      };
     }
   }, [guestId]);
 
@@ -112,21 +78,43 @@ export default function LandingPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name) return;
-    if (guestId && !guestRecordFound) {
-      alert('This RSVP link is invalid. Please use the link shared with you by the host.');
-      return;
-    }
+    setSubmissionError('');
+    const validationError = validateRsvpSubmission({
+      name,
+      status: rsvpStatus,
+      adults,
+      children,
+      isInvalidInviteLink: Boolean(guestId && !guestRecordFound)
+    });
 
-    if (rsvpStatus !== 'declined' && adults + children === 0) {
-      alert('Please select at least one guest.');
+    if (validationError) {
+      setSubmissionError(validationError);
       return;
     }
 
     setIsSubmitting(true);
     try {
+      if (!activeGuestId) {
+        const guestSnapshot = await getDocs(collection(db, 'guests'));
+        const duplicateGuest = findDuplicateGuestByName(
+          guestSnapshot.docs.map((snapshot) => ({ id: snapshot.id, ...snapshot.data() })),
+          name
+        );
+
+        if (duplicateGuest) {
+          setSubmissionError(
+            duplicateGuest.status && duplicateGuest.status !== 'pending'
+              ? 'An RSVP already exists for this name. Please use your original invite link to edit it or contact the host.'
+              : 'This guest already exists in the invitation list. Please use the invite link shared by the host.'
+          );
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
       const rsvpPayload = {
-        name,
+        name: name.trim(),
+        normalizedName: normalizeGuestName(name),
         status: rsvpStatus,
         adults: rsvpStatus === 'declined' ? 0 : adults,
         children: rsvpStatus === 'declined' ? 0 : children,
@@ -148,6 +136,7 @@ export default function LandingPage() {
       setIsSubmitted(true);
     } catch (error) {
       handleFirestoreError(error, activeGuestId ? OperationType.UPDATE : OperationType.CREATE, activeGuestId ? `guests/${activeGuestId}` : 'guests');
+      setSubmissionError('We couldn’t save your RSVP just now. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -240,8 +229,21 @@ export default function LandingPage() {
                             </span>
                           </div>
                           <div className="min-w-0 flex-1 px-1 py-1">
-                            <p className="text-sm md:text-[15px] font-semibold text-[#4b2f20]">{item.time}</p>
-                            <p className="mt-1 text-[15px] md:text-base text-[#6f513d] leading-snug">{item.event}</p>
+                            <div className="text-sm md:text-[15px] text-[#4b2f20] leading-tight">
+                              {item.time.toLowerCase().includes('onwards') ? (
+                                <>
+                                  <p>{item.time.replace(/\s*onwards/i, '').trim()}</p>
+                                  <p className="mt-1 text-[15px] md:text-base text-[#6f513d] leading-snug">
+                                    onwards {item.event}
+                                  </p>
+                                </>
+                              ) : (
+                                <p>{item.time}</p>
+                              )}
+                            </div>
+                            {!item.time.toLowerCase().includes('onwards') && (
+                              <p className="mt-1 text-[15px] md:text-base text-[#6f513d] leading-snug">{item.event}</p>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -345,6 +347,11 @@ export default function LandingPage() {
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-8">
+                  {submissionError && (
+                    <div className="rounded-2xl border border-[#f2c8c2] bg-[#fff5f3] px-4 py-3 text-sm font-medium text-[#8a3b2e]">
+                      {submissionError}
+                    </div>
+                  )}
                   <div className="rounded-[1.5rem] bg-[#fff8ee]/85 border border-[#e7c485]/30 p-5 md:p-6">
                     <div className="flex items-center gap-3 mb-4">
                       <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#f5ead9] text-[#5b3624] font-bold">1</div>

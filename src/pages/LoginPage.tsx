@@ -8,6 +8,7 @@ import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { isAuthorizedAdmin } from '../lib/adminUtils';
 
 export default function LoginPage() {
   const { user, loading: authLoading } = useAuth();
@@ -15,9 +16,6 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
-
-  const adminEmails = ['bsaireddy05@gmail.com', 'naveenr028@gmail.com', 'kottapriyanka5@gmail.com'];
-  const isAuthorizedAdmin = (email?: string | null) => Boolean(email && adminEmails.includes(email));
 
   useEffect(() => {
     if (!authLoading && isAuthorizedAdmin(user?.email)) {

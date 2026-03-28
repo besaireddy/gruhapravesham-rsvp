@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { 
@@ -25,6 +25,19 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSettings, Settings } from '../contexts/SettingsContext';
 import { collection, onSnapshot, query, orderBy, deleteDoc, doc, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
+import { hasEventPassed } from '../lib/eventUtils';
+import {
+  buildInviteMessage,
+  buildThankYouMessage,
+  formatDisplayUsPhoneNumber,
+  formatEditableUsPhoneNumber,
+  formatUsPhoneNumber,
+  getDashboardStats,
+  getMessagePreview,
+  matchesGuestSearch,
+  normalizeGuestName,
+  normalizeUsPhoneNumber
+} from '../lib/guestUtils';
 import Papa from 'papaparse';
 
 export default function AdminPage() {
@@ -60,7 +73,7 @@ export default function AdminPage() {
           <div className="flex items-center justify-between gap-3">
             <button
               onClick={() => navigate('/')}
-              className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface text-[#717171] hover:text-[#222222] transition-colors"
+              className="flex items-center justify-center w-10 h-10 rounded-full border border-transparent bg-white text-[#717171] hover:border-[#eadfce] hover:bg-[#fff8ee] hover:text-[#222222] hover:shadow-[0_10px_20px_rgba(44,30,18,0.08)] transition-all duration-200"
               aria-label="Back to invitation"
             >
               <ChevronLeft className="w-5 h-5" />
@@ -75,7 +88,7 @@ export default function AdminPage() {
             </div>
             <button
               onClick={() => auth.signOut()}
-              className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface text-[#717171] hover:text-[#222222] transition-colors"
+              className="flex items-center justify-center w-10 h-10 rounded-full border border-transparent bg-white text-[#717171] hover:border-[#eadfce] hover:bg-[#fff8ee] hover:text-[#222222] hover:shadow-[0_10px_20px_rgba(44,30,18,0.08)] transition-all duration-200"
               aria-label="Sign out"
             >
               <LogOut className="w-5 h-5" />
@@ -84,9 +97,8 @@ export default function AdminPage() {
         </div>
         <nav className="flex-1 px-4 space-y-1">
           <SidebarLink to="/admin" icon={<BarChart3 className="w-5 h-5" />} label="Dashboard" active={location.pathname === '/admin'} />
-          <SidebarLink to="/admin/invites" icon={<Users className="w-5 h-5" />} label="Contacts & Invites" active={location.pathname === '/admin/invites' || location.pathname === '/admin/guests'} />
+          <SidebarLink to="/admin/invites" icon={<Users className="w-5 h-5" />} label="Contacts & Invites" active={location.pathname === '/admin/invites' || location.pathname === '/admin/guests' || location.pathname === '/admin/thank-you'} />
           <SidebarLink to="/admin/settings" icon={<SettingsIcon className="w-5 h-5" />} label="Settings" active={location.pathname === '/admin/settings'} />
-          <SidebarLink to="/admin/thank-you" icon={<Heart className="w-5 h-5" />} label="Thank You" active={location.pathname === '/admin/thank-you'} />
         </nav>
       </aside>
 
@@ -95,7 +107,7 @@ export default function AdminPage() {
         <div className="flex justify-between items-center gap-3 p-4 md:hidden bg-white border-b border-[#ebebeb]">
           <button
             onClick={() => navigate('/')}
-            className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface text-[#717171] hover:text-[#222222] transition-colors"
+            className="flex items-center justify-center w-10 h-10 rounded-full border border-transparent bg-white text-[#717171] hover:border-[#eadfce] hover:bg-[#fff8ee] hover:text-[#222222] hover:shadow-[0_10px_20px_rgba(44,30,18,0.08)] transition-all duration-200"
             aria-label="Back to invitation"
           >
             <ChevronLeft className="w-5 h-5" />
@@ -110,7 +122,7 @@ export default function AdminPage() {
           </div>
           <button
             onClick={() => auth.signOut()}
-            className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-surface text-[#717171] hover:text-[#222222] transition-colors"
+            className="flex items-center justify-center w-10 h-10 rounded-full border border-transparent bg-white text-[#717171] hover:border-[#eadfce] hover:bg-[#fff8ee] hover:text-[#222222] hover:shadow-[0_10px_20px_rgba(44,30,18,0.08)] transition-all duration-200"
             aria-label="Sign out"
           >
             <LogOut className="w-5 h-5" />
@@ -122,7 +134,7 @@ export default function AdminPage() {
             <Route path="invites" element={<InvitePage />} />
             <Route path="guests" element={<InvitePage />} />
             <Route path="settings" element={<SettingsPage />} />
-            <Route path="thank-you" element={<ThankYouPage />} />
+            <Route path="thank-you" element={<InvitePage />} />
           </Routes>
         </div>
       </main>
@@ -133,17 +145,13 @@ export default function AdminPage() {
           <BarChart3 className="w-5 h-5" />
           <span className="text-[10px] font-bold">Stats</span>
         </Link>
-        <Link to="/admin/invites" className={`flex flex-col items-center gap-1 p-2 ${location.pathname === '/admin/invites' || location.pathname === '/admin/guests' ? 'text-brand' : 'text-[#717171]'}`}>
+        <Link to="/admin/invites" className={`flex flex-col items-center gap-1 p-2 ${location.pathname === '/admin/invites' || location.pathname === '/admin/guests' || location.pathname === '/admin/thank-you' ? 'text-brand' : 'text-[#717171]'}`}>
           <Users className="w-5 h-5" />
           <span className="text-[10px] font-bold">Contacts</span>
         </Link>
         <Link to="/admin/settings" className={`flex flex-col items-center gap-1 p-2 ${location.pathname === '/admin/settings' ? 'text-brand' : 'text-[#717171]'}`}>
           <SettingsIcon className="w-5 h-5" />
           <span className="text-[10px] font-bold">Settings</span>
-        </Link>
-        <Link to="/admin/thank-you" className={`flex flex-col items-center gap-1 p-2 ${location.pathname === '/admin/thank-you' ? 'text-brand' : 'text-[#717171]'}`}>
-          <Heart className="w-5 h-5" />
-          <span className="text-[10px] font-bold">Thanks</span>
         </Link>
       </div>
     </div>
@@ -167,6 +175,12 @@ function SidebarLink({ to, icon, label, active }: { to: string, icon: React.Reac
 function Dashboard() {
   const [guests, setGuests] = useState<any[]>([]);
   const [selectedResponseIds, setSelectedResponseIds] = useState<string[]>([]);
+  const [expandedResponseIds, setExpandedResponseIds] = useState<string[]>([]);
+  const longPressRef = useRef<{ timeoutId: number | null; guestId: string | null; triggered: boolean }>({
+    timeoutId: null,
+    guestId: null,
+    triggered: false
+  });
 
   useEffect(() => {
     const q = query(collection(db, 'guests'));
@@ -178,18 +192,9 @@ function Dashboard() {
     return unsubscribe;
   }, []);
 
-  const stats = {
-    total: guests.length,
-    attending: guests.filter(g => g.status === 'attending').length,
-    maybe: guests.filter(g => g.status === 'maybe').length,
-    declined: guests.filter(g => g.status === 'declined').length,
-    pending: guests.filter(g => g.status === 'pending').length,
-    adults: guests.reduce((acc, g) => acc + (g.adults || 0), 0),
-    children: guests.reduce((acc, g) => acc + (g.children || 0), 0)
-  };
-
-  const totalPeopleAttending = stats.adults + stats.children;
-  const respondedGuests = guests.filter(g => g.status !== 'pending');
+  const stats = useMemo(() => getDashboardStats(guests), [guests]);
+  const totalPeopleAttending = stats.totalPeopleAttending;
+  const respondedGuests = useMemo(() => guests.filter(g => g.status !== 'pending'), [guests]);
   const allResponsesSelected = respondedGuests.length > 0 && respondedGuests.every(g => selectedResponseIds.includes(g.id));
 
   const toggleResponseSelection = (guestId: string) => {
@@ -230,9 +235,104 @@ function Dashboard() {
     }
   };
 
+  const toggleResponseMessage = (guestId: string) => {
+    setExpandedResponseIds((current) =>
+      current.includes(guestId) ? current.filter((id) => id !== guestId) : [...current, guestId]
+    );
+  };
+
+  const exportDashboardData = () => {
+    const escapeCsvValue = (value: string | number) => {
+      const stringValue = String(value ?? '');
+      return /[",\n]/.test(stringValue) ? `"${stringValue.replace(/"/g, '""')}"` : stringValue;
+    };
+
+    const summaryRows = [
+      ['Metric', 'Value'],
+      ['Total RSVPs', stats.total],
+      ['Attending', stats.attending],
+      ['Declined', stats.declined],
+      ['Pending', stats.pending],
+      ['Total people attending', totalPeopleAttending],
+      ['Adults attending', stats.adults],
+      ['Children attending', stats.children]
+    ];
+
+    const responseRows = [
+      ['Name', 'Status', 'Adults', 'Children', 'Total Guests', 'Message'],
+      ...respondedGuests.map((guest) => [
+        guest.name || '',
+        guest.status || '',
+        guest.adults || 0,
+        guest.children || 0,
+        (guest.adults || 0) + (guest.children || 0),
+        guest.message || ''
+      ])
+    ];
+
+    const csvContent = [
+      ...summaryRows.map((row) => row.map(escapeCsvValue).join(',')),
+      '',
+      'Responses',
+      ...responseRows.map((row) => row.map(escapeCsvValue).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `gruhapravesham-dashboard-${dateStamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const beginResponseLongPress = (guestId: string) => {
+    if (selectedResponseIds.includes(guestId)) return;
+
+    longPressRef.current.guestId = guestId;
+    longPressRef.current.triggered = false;
+    longPressRef.current.timeoutId = window.setTimeout(() => {
+      toggleResponseSelection(guestId);
+      longPressRef.current.triggered = true;
+      longPressRef.current.timeoutId = null;
+    }, 450);
+  };
+
+  const endResponseLongPress = () => {
+    if (longPressRef.current.timeoutId) {
+      window.clearTimeout(longPressRef.current.timeoutId);
+      longPressRef.current.timeoutId = null;
+    }
+  };
+
+  const handleResponseCardClick = (guestId: string) => {
+    if (longPressRef.current.triggered && longPressRef.current.guestId === guestId) {
+      longPressRef.current.triggered = false;
+      longPressRef.current.guestId = null;
+      return;
+    }
+
+    if (selectedResponseIds.length > 0) {
+      toggleResponseSelection(guestId);
+    }
+  };
+
   return (
     <div className="space-y-6 md:space-y-8">
-      <h1 className="text-3xl md:text-4xl font-bold tracking-tight">Dashboard</h1>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-3xl md:text-4xl font-bold tracking-tight">Dashboard</h1>
+        <button
+          type="button"
+          onClick={exportDashboardData}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-[#e7c485]/50 bg-[#fff8ee] px-4 py-2.5 text-sm font-semibold text-[#7a5035] transition-colors hover:bg-[#f8ead0]"
+        >
+          <FileUp className="w-4 h-4" />
+          <span>Export CSV</span>
+        </button>
+      </div>
       
       <div className="grid grid-cols-2 gap-4 md:gap-6">
         <SnapshotCard
@@ -253,10 +353,11 @@ function Dashboard() {
           accent="bg-[#f3efe8]"
           badge="bg-[#efe5d6]"
           icon="status"
+          highlight={{ label: 'Total RSVPs', value: stats.total.toString() }}
           stats={[
-            { label: 'Total RSVPs', value: stats.total.toString() },
             { label: 'Attending', value: stats.attending.toString() },
-            { label: 'Declined + pending', value: String(stats.declined + stats.pending) }
+            { label: 'Declined', value: stats.declined.toString() },
+            { label: 'Pending', value: stats.pending.toString() }
           ]}
         />
       </div>
@@ -265,13 +366,19 @@ function Dashboard() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <h3 className="text-xl font-bold">Responses</h3>
           <div className="flex items-center gap-3">
-            <label className="inline-flex items-center gap-2 text-sm font-medium text-[#6b4b3a]">
-              <input
-                type="checkbox"
-                checked={allResponsesSelected}
-                onChange={toggleSelectAllResponses}
-                className="h-4 w-4 rounded border-[#d7c3a4] text-[#5b3624] focus:ring-[#5b3624]"
-              />
+            <label className="inline-flex items-center gap-3 text-sm font-medium text-[#6b4b3a]">
+              <button
+                type="button"
+                onClick={toggleSelectAllResponses}
+                className={`flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
+                  allResponsesSelected
+                    ? 'border-brand bg-brand text-white'
+                    : 'border-[#d8c3aa] bg-white text-transparent hover:border-brand/60'
+                }`}
+                aria-label={allResponsesSelected ? 'Deselect all responses' : 'Select all responses'}
+              >
+                <Check className="w-3 h-3" strokeWidth={3} />
+              </button>
               <span>Select all</span>
             </label>
             <button
@@ -287,35 +394,98 @@ function Dashboard() {
         </div>
         <div className="space-y-4">
           {respondedGuests.map((guest) => (
-            <div key={guest.id} className="p-6 bg-white rounded-2xl border border-[#ebebeb] hover:shadow-md transition-all">
+            <div
+              key={guest.id}
+              className={`relative overflow-hidden rounded-[1.75rem] border p-5 shadow-[0_14px_28px_rgba(64,36,22,0.08)] transition-all ${
+                selectedResponseIds.includes(guest.id)
+                  ? 'border-[#d8a033] bg-gradient-to-br from-[#fff9ef] via-[#fff2db] to-[#f7e4be] ring-2 ring-[#d8a033]/35'
+                  : 'border-[#eadfce] bg-gradient-to-br from-white via-[#fffaf4] to-[#f5ead9]'
+              }`}
+              onPointerDown={() => beginResponseLongPress(guest.id)}
+              onPointerUp={endResponseLongPress}
+              onPointerLeave={endResponseLongPress}
+              onPointerCancel={endResponseLongPress}
+              onClick={() => handleResponseCardClick(guest.id)}
+            >
+              <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-[#d8a033]/40 to-transparent" />
               <div className="min-w-0">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <input
-                      type="checkbox"
-                      checked={selectedResponseIds.includes(guest.id)}
-                      onChange={() => toggleResponseSelection(guest.id)}
-                      className="mt-1 h-4 w-4 rounded border-[#d7c3a4] text-[#5b3624] focus:ring-[#5b3624]"
-                    />
-                    <p className="font-bold text-lg text-[#222222] truncate">{guest.name}</p>
+                <div className="flex items-start gap-3">
+                  <div className={`relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-sm font-bold shadow-sm ${
+                    selectedResponseIds.includes(guest.id)
+                      ? 'bg-[#d8a033] text-white'
+                      : 'bg-[#f0debf] text-[#6a4430]'
+                  }`}>
+                    {selectedResponseIds.includes(guest.id) ? (
+                      <Check className="w-5 h-5" strokeWidth={3} />
+                    ) : (
+                      guest.name
+                        .split(' ')
+                        .filter(Boolean)
+                        .slice(0, 2)
+                        .map((part: string) => part[0]?.toUpperCase())
+                        .join('')
+                    )}
+                    <span className={`absolute -right-1 -bottom-1 flex h-5 w-5 items-center justify-center rounded-full ring-2 ring-[#fffaf4] shadow-sm ${
+                      guest.status === 'attending'
+                        ? 'bg-[#2f8a4b] text-white'
+                        : 'bg-[#8a3b2e] text-white'
+                    }`}>
+                      {guest.status === 'attending' ? (
+                        <Check className="w-3 h-3" strokeWidth={2.5} />
+                      ) : (
+                        <X className="w-3 h-3" strokeWidth={2.5} />
+                      )}
+                    </span>
                   </div>
-                  <p className="text-sm font-bold text-[#4d2718] whitespace-nowrap">
-                    {(guest.adults || 0) + (guest.children || 0)} guests
-                  </p>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-start justify-between gap-4">
+                        <p className="font-bold text-lg text-[#2f1b12] truncate">{guest.name}</p>
+                        <p className="text-sm font-bold text-[#4d2718] whitespace-nowrap">
+                          {(guest.adults || 0) + (guest.children || 0)} guests
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold capitalize ${
+                          guest.status === 'attending'
+                            ? 'bg-[#e7f6ea] text-[#2f8a4b]'
+                            : 'bg-[#f8ebe7] text-[#8a3b2e]'
+                        }`}>
+                          {guest.status}
+                        </span>
+                        {guest.status !== 'declined' && (
+                          <>
+                            <span className="inline-flex items-center rounded-full border border-[#eadfce] bg-white/85 px-3 py-1 text-xs font-semibold text-[#6b4b3a]">
+                              {guest.adults || 0} adult{(guest.adults || 0) === 1 ? '' : 's'}
+                            </span>
+                            <span className="inline-flex items-center rounded-full border border-[#eadfce] bg-white/85 px-3 py-1 text-xs font-semibold text-[#6b4b3a]">
+                              {guest.children || 0} child{(guest.children || 0) === 1 ? '' : 'ren'}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {guest.message && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (selectedResponseIds.length > 0) {
+                            toggleResponseSelection(guest.id);
+                            return;
+                          }
+                          toggleResponseMessage(guest.id);
+                        }}
+                        className="mt-3 w-full rounded-2xl bg-white/70 border border-[#efe3d3] px-3 py-3 text-left transition-colors hover:bg-white/90"
+                        aria-label={`${expandedResponseIds.includes(guest.id) ? 'Collapse' : 'Expand'} message for ${guest.name}`}
+                      >
+                        <p className={`text-sm text-[#6b4b3a] leading-relaxed ${expandedResponseIds.includes(guest.id) ? '' : 'line-clamp-1'}`}>
+                          {guest.message}
+                        </p>
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <p className="mt-2 text-sm font-semibold text-[#6b4b3a]">
-                  <span className="capitalize">{guest.status}</span>
-                  {guest.status !== 'declined' && (
-                    <>
-                      <span className="mx-2 text-[#b79361]">-</span>
-                      <span>[{guest.adults || 0}A]</span>
-                      <span className="mx-1">[{guest.children || 0}C]</span>
-                    </>
-                  )}
-                </p>
-                {guest.message && (
-                  <p className="mt-2 text-sm text-[#717171] line-clamp-2">{guest.message}</p>
-                )}
               </div>
             </div>
           ))}
@@ -331,6 +501,7 @@ function SnapshotCard({
   accent,
   badge,
   icon,
+  highlight,
   stats
 }: {
   title: string,
@@ -338,9 +509,11 @@ function SnapshotCard({
   accent: string,
   badge: string,
   icon: 'people' | 'status',
+  highlight?: { label: string, value: string },
   stats: { label: string, value: string }[]
 }) {
   const isPeople = icon === 'people';
+  const isStatus = icon === 'status';
 
   return (
     <div className="rounded-[1.5rem] md:rounded-[2rem] bg-white border border-[#e8e3da] shadow-[0_18px_40px_rgba(44,30,18,0.08)] p-4 md:p-8">
@@ -360,6 +533,10 @@ function SnapshotCard({
                 <div className="h-8 w-8 md:h-11 md:w-11 rounded-full bg-[#c48d57]" />
                 <div className="h-4.5 w-4.5 md:h-7 md:w-7 rounded-full bg-[#e8c79d]" />
               </div>
+            ) : isStatus && highlight ? (
+              <div className="flex h-12 w-12 md:h-16 md:w-16 items-center justify-center rounded-full bg-white/80 border border-[#e0d2bf] text-[#4d2718] shadow-sm px-1">
+                <span className="text-base md:text-xl font-bold tracking-tight leading-none">{highlight.value}</span>
+              </div>
             ) : (
               <div className="flex items-end gap-1.5 md:gap-2">
                 <div className="w-2.5 md:w-3.5 rounded-t-full bg-[#e6c083]" style={{ height: '18px' }} />
@@ -372,232 +549,25 @@ function SnapshotCard({
           <p className="mt-1 md:mt-2 text-xs md:text-base text-[#555555] font-semibold">{subtitle}</p>
         </div>
 
-        <div className="space-y-3 md:space-y-5">
+        <div className="space-y-3 md:space-y-5 text-center">
+          {highlight && !isStatus && (
+            <div className="pb-3 md:pb-5 border-b border-[#ece7df]">
+              <div className="flex items-center justify-center gap-3 md:gap-4">
+                <div className="flex h-14 w-14 md:h-20 md:w-20 shrink-0 items-center justify-center rounded-full bg-[#fff6e6] border border-[#ead8bd] text-[#4d2718] shadow-sm">
+                  <span className="text-lg md:text-2xl font-bold tracking-tight">{highlight.value}</span>
+                </div>
+                <div className="min-w-0 text-left">
+                  <p className="text-sm md:text-lg font-semibold text-[#2f2f2f]">{highlight.label}</p>
+                </div>
+              </div>
+            </div>
+          )}
           {stats.map((stat, index) => (
             <div key={stat.label} className={index < stats.length - 1 ? 'pb-3 md:pb-5 border-b border-[#ece7df]' : ''}>
               <p className="text-2xl md:text-4xl font-bold tracking-tight text-[#2f2f2f]">{stat.value}</p>
-              <p className="text-xs md:text-base text-[#555555] font-medium leading-snug">{stat.label}</p>
+              <p className="mt-1 text-xs md:text-base text-[#555555] font-medium leading-snug">{stat.label}</p>
             </div>
           ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function GuestManagement() {
-  const [guests, setGuests] = useState<any[]>([]);
-  const [search, setSearch] = useState('');
-  const [isAdding, setIsAdding] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newPhone, setNewPhone] = useState('');
-
-  const formatUsPhoneNumber = (value: string) => {
-    const digits = value.replace(/\D/g, '').slice(0, 10);
-    if (digits.length <= 3) return digits;
-    if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-  };
-
-  const normalizeUsPhoneNumber = (value: string) => {
-    const digits = value.replace(/\D/g, '');
-    return digits.length === 10 ? `+1${digits}` : value;
-  };
-
-  const formatEditableUsPhoneNumber = (value: string) => {
-    const digits = value.replace(/\D/g, '');
-    const localDigits = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
-    return formatUsPhoneNumber(localDigits);
-  };
-
-  const formatDisplayUsPhoneNumber = (value: string) => {
-    const digits = value.replace(/\D/g, '');
-    const localDigits = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
-    return localDigits ? `+1 ${formatUsPhoneNumber(localDigits)}` : '';
-  };
-
-  useEffect(() => {
-    const q = query(collection(db, 'guests'), orderBy('name'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setGuests(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'guests');
-    });
-    return unsubscribe;
-  }, []);
-
-  const handleAddGuest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName) return;
-    const phoneDigits = newPhone.replace(/\D/g, '');
-    if (newPhone && phoneDigits.length !== 10) {
-      alert('Please enter a valid 10-digit US mobile number.');
-      return;
-    }
-    try {
-      await addDoc(collection(db, 'guests'), {
-        name: newName,
-        phone: normalizeUsPhoneNumber(newPhone),
-        status: 'pending',
-        adults: 0,
-        children: 0,
-        message: '',
-        invited: false,
-        lastUpdated: serverTimestamp()
-      });
-      setNewName('');
-      setNewPhone('');
-      setIsAdding(false);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'guests');
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (confirm('Delete this guest?')) {
-      try {
-        await deleteDoc(doc(db, 'guests', id));
-      } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `guests/${id}`);
-      }
-    }
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      Papa.parse(file, {
-        header: true,
-        complete: (results) => {
-          results.data.forEach(async (row: any) => {
-            if (row.name) {
-              await addDoc(collection(db, 'guests'), {
-                name: row.name,
-                phone: row.phone || '',
-                status: 'pending',
-                adults: 0,
-                children: 0,
-                message: '',
-                invited: false,
-                lastUpdated: serverTimestamp()
-              });
-            }
-          });
-        }
-      });
-    }
-  };
-
-  const filteredGuests = guests.filter(g => 
-    g.name.toLowerCase().includes(search.toLowerCase()) || 
-    g.phone.includes(search)
-  );
-
-  return (
-    <div className="space-y-6 md:space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <h1 className="text-3xl md:text-4xl font-bold tracking-tight">Guest List</h1>
-        <div className="flex flex-wrap gap-2 md:gap-3">
-          <label className="apple-button bg-white border border-[#ebebeb] flex items-center gap-2 cursor-pointer hover:bg-surface text-xs md:text-sm px-3 md:px-6 py-2 md:py-3">
-            <FileUp className="w-4 h-4" />
-            <span className="hidden sm:inline">Import CSV</span>
-            <span className="sm:hidden">Import</span>
-            <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
-          </label>
-          <button 
-            onClick={() => setIsAdding(true)}
-            className="apple-button bg-[#222222] text-white flex items-center gap-2 text-xs md:text-sm px-3 md:px-6 py-2 md:py-3"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Add Guest</span>
-            <span className="sm:hidden">Add</span>
-          </button>
-        </div>
-      </div>
-
-      <div className="relative">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#717171]" />
-        <input 
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search guests..."
-          className="w-full bg-white border border-[#ebebeb] rounded-2xl pl-12 pr-4 py-4 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand transition-all"
-        />
-      </div>
-
-      {isAdding && (
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="apple-card p-8"
-        >
-          <form onSubmit={handleAddGuest} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <input 
-              required
-              placeholder="Guest Name"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              className="px-4 py-3 bg-surface rounded-xl focus:outline-none"
-            />
-            <input 
-              placeholder="(602) 642-7380"
-              value={newPhone}
-              onChange={(e) => setNewPhone(formatUsPhoneNumber(e.target.value))}
-              inputMode="tel"
-              className="px-4 py-3 bg-surface rounded-xl focus:outline-none"
-            />
-            <div className="flex gap-2">
-              <button type="submit" className="flex-1 bg-brand text-white font-bold rounded-xl">Save</button>
-              <button type="button" onClick={() => setIsAdding(false)} className="px-4 bg-[#ebebeb] rounded-xl"><X /></button>
-            </div>
-          </form>
-        </motion.div>
-      )}
-
-      <div className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left hidden sm:table">
-            <thead>
-              <tr className="bg-surface border-b border-[#ebebeb]">
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-[#717171]">Name</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-[#717171]">Phone</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-[#717171]">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#ebebeb]">
-              {filteredGuests.map((guest) => (
-                <tr key={guest.id} className="hover:bg-surface transition-colors">
-                  <td className="px-6 py-4 font-bold">{guest.name}</td>
-                  <td className="px-6 py-4 text-[#717171]">{guest.phone}</td>
-                  <td className="px-6 py-4">
-                    <div className="flex gap-2">
-                      <button onClick={() => handleDelete(guest.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {/* Mobile View */}
-          <div className="sm:hidden divide-y divide-[#ebebeb]">
-            {filteredGuests.map((guest) => (
-              <div key={guest.id} className="p-4 space-y-3 bg-white mb-4 rounded-2xl border border-[#ebebeb]">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-bold text-lg">{guest.name}</p>
-                    <p className="text-sm text-[#717171]">{guest.phone}</p>
-                  </div>
-                  <button onClick={() => handleDelete(guest.id)} className="p-2 text-red-500">
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
       </div>
     </div>
@@ -607,39 +577,29 @@ function GuestManagement() {
 function InvitePage() {
   const [guests, setGuests] = useState<any[]>([]);
   const { settings } = useSettings();
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingMessage, setEditingMessage] = useState<{ guestId: string; type: 'invite' | 'thanks' } | null>(null);
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
+  const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
   const [editingContactName, setEditingContactName] = useState('');
   const [editingContactPhone, setEditingContactPhone] = useState('');
-  const [customMsgs, setCustomMsgs] = useState<Record<string, string>>({});
+  const [inviteMsgs, setInviteMsgs] = useState<Record<string, string>>({});
+  const [thankMsgs, setThankMsgs] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
+  const [pendingNextGuestId, setPendingNextGuestId] = useState<string | null>(null);
+  const [guidedNextGuestId, setGuidedNextGuestId] = useState<string | null>(null);
+  const longPressRef = useRef<{ timeoutId: number | null; guestId: string | null; triggered: boolean }>({
+    timeoutId: null,
+    guestId: null,
+    triggered: false
+  });
+  const contactCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  const formatUsPhoneNumber = (value: string) => {
-    const digits = value.replace(/\D/g, '').slice(0, 10);
-    if (digits.length <= 3) return digits;
-    if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-  };
-
-  const normalizeUsPhoneNumber = (value: string) => {
-    const digits = value.replace(/\D/g, '');
-    return digits.length === 10 ? `+1${digits}` : value;
-  };
-
-  const formatEditableUsPhoneNumber = (value: string) => {
-    const digits = value.replace(/\D/g, '');
-    const localDigits = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
-    return formatUsPhoneNumber(localDigits);
-  };
-
-  const formatDisplayUsPhoneNumber = (value: string) => {
-    const digits = value.replace(/\D/g, '');
-    const localDigits = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
-    return localDigits ? formatUsPhoneNumber(localDigits) : '';
-  };
+  const deferredSearch = useDeferredValue(search);
+  const eventHasPassed = useMemo(() => hasEventPassed(settings.eventDate), [settings.eventDate]);
+  const activeMessageType: 'invite' | 'thanks' = eventHasPassed ? 'thanks' : 'invite';
 
   useEffect(() => {
     const q = query(collection(db, 'guests'), orderBy('name'));
@@ -647,21 +607,25 @@ function InvitePage() {
       const guestData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
       setGuests(guestData);
       
-      const msgs: Record<string, string> = {};
+      const nextInviteMsgs: Record<string, string> = {};
+      const nextThankMsgs: Record<string, string> = {};
       guestData.forEach(g => {
-        msgs[g.id] = `Dear ${g.name},\n\nWith joy in our hearts, we are stepping into our new home and would be delighted to celebrate this special occasion with you. Please join us for our Gruhapravesham (housewarming) on ${settings.eventDate}.\n\nYour presence would mean a lot to us.\n\nKindly RSVP here:\n${window.location.origin}?guestId=${g.id}\n\nWith love,\n${settings.hostName}`;
+        nextInviteMsgs[g.id] = inviteMsgs[g.id] || buildInviteMessage(g.name, settings.eventDate, settings.hostName, g.id, window.location.origin);
+        nextThankMsgs[g.id] = thankMsgs[g.id] || buildThankYouMessage(g.name, settings.hostName);
       });
-      setCustomMsgs(msgs);
+      setInviteMsgs(nextInviteMsgs);
+      setThankMsgs(nextThankMsgs);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'guests');
     });
     return unsubscribe;
-  }, [settings.eventDate]);
+  }, [inviteMsgs, settings.eventDate, settings.hostName, thankMsgs]);
 
-  const filteredGuests = guests.filter(g =>
-    g.name.toLowerCase().includes(search.toLowerCase()) ||
-    (g.phone || '').includes(search)
+  const filteredGuests = useMemo(
+    () => guests.filter((guest) => matchesGuestSearch(guest, deferredSearch)),
+    [deferredSearch, guests]
   );
+  const allFilteredContactsSelected = filteredGuests.length > 0 && filteredGuests.every((guest) => selectedContactIds.includes(guest.id));
 
   const handleAddGuest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -700,6 +664,7 @@ function InvitePage() {
             if (row.name) {
               await addDoc(collection(db, 'guests'), {
                 name: row.name,
+                normalizedName: normalizeGuestName(String(row.name)),
                 phone: row.phone ? normalizeUsPhoneNumber(String(row.phone)) : '',
                 status: 'pending',
                 adults: 0,
@@ -715,25 +680,64 @@ function InvitePage() {
     }
   };
 
+  const getSendQueue = () => {
+    const baseQueue = selectedContactIds.length > 0
+      ? filteredGuests.filter((guest) => selectedContactIds.includes(guest.id))
+      : filteredGuests;
+
+    return baseQueue.filter((guest) => guest.phone && guest.phone.replace(/\D/g, '').length >= 10);
+  };
+
+  const queueNextContactAfterSend = (guestId: string) => {
+    const queue = getSendQueue();
+    const currentIndex = queue.findIndex((guest) => guest.id === guestId);
+    const nextGuest = currentIndex >= 0 ? queue[currentIndex + 1] : null;
+    const nextGuestId = nextGuest?.id ?? null;
+    setPendingNextGuestId(nextGuestId);
+
+    if (nextGuestId) {
+      sessionStorage.setItem('nextContactGuestId', nextGuestId);
+    } else {
+      sessionStorage.removeItem('nextContactGuestId');
+      setGuidedNextGuestId(null);
+    }
+  };
+
+  const focusGuidedContact = (guestId: string) => {
+    const nextCard = contactCardRefs.current[guestId];
+    if (nextCard) {
+      nextCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setGuidedNextGuestId(guestId);
+      setPendingNextGuestId(null);
+      sessionStorage.removeItem('nextContactGuestId');
+    }
+  };
+
   const sendWhatsApp = (guest: any) => {
-    const msg = encodeURIComponent(customMsgs[guest.id]);
+    const msg = encodeURIComponent(activeMessageType === 'invite' ? inviteMsgs[guest.id] || '' : thankMsgs[guest.id] || '');
     const phone = guest.phone.replace(/\D/g, '');
+    queueNextContactAfterSend(guest.id);
     window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
-    try {
-      updateDoc(doc(db, 'guests', guest.id), { invited: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `guests/${guest.id}`);
+    if (activeMessageType === 'invite') {
+      try {
+        updateDoc(doc(db, 'guests', guest.id), { invited: true });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `guests/${guest.id}`);
+      }
     }
   };
 
   const sendSMS = (guest: any) => {
-    const msg = encodeURIComponent(customMsgs[guest.id]);
+    const msg = encodeURIComponent(activeMessageType === 'invite' ? inviteMsgs[guest.id] || '' : thankMsgs[guest.id] || '');
     const phone = guest.phone.replace(/\D/g, '');
+    queueNextContactAfterSend(guest.id);
     window.open(`sms:${phone}?body=${msg}`, '_blank');
-    try {
-      updateDoc(doc(db, 'guests', guest.id), { invited: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `guests/${guest.id}`);
+    if (activeMessageType === 'invite') {
+      try {
+        updateDoc(doc(db, 'guests', guest.id), { invited: true });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `guests/${guest.id}`);
+      }
     }
   };
 
@@ -760,6 +764,7 @@ function InvitePage() {
     try {
       await updateDoc(doc(db, 'guests', guestId), {
         name: trimmedName,
+        normalizedName: normalizeGuestName(trimmedName),
         phone: normalizeUsPhoneNumber(editingContactPhone),
         lastUpdated: serverTimestamp()
       });
@@ -771,10 +776,117 @@ function InvitePage() {
     }
   };
 
+  const toggleContactSelection = (guestId: string) => {
+    setSelectedContactIds((current) =>
+      current.includes(guestId) ? current.filter((id) => id !== guestId) : [...current, guestId]
+    );
+  };
+
+  const toggleSelectAllContacts = () => {
+    if (allFilteredContactsSelected) {
+      const filteredIds = new Set(filteredGuests.map((guest) => guest.id));
+      setSelectedContactIds((current) => current.filter((id) => !filteredIds.has(id)));
+      return;
+    }
+
+    setSelectedContactIds((current) => {
+      const next = new Set(current);
+      filteredGuests.forEach((guest) => next.add(guest.id));
+      return Array.from(next);
+    });
+  };
+
+  const deleteSelectedContacts = async () => {
+    if (selectedContactIds.length === 0) return;
+    if (!confirm(`Delete ${selectedContactIds.length} selected contact(s)? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      await Promise.all(selectedContactIds.map((guestId) => deleteDoc(doc(db, 'guests', guestId))));
+      setSelectedContactIds([]);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'guests');
+    }
+  };
+
+  const beginContactLongPress = (guestId: string) => {
+    if (editingContactId) return;
+    if (longPressRef.current.timeoutId) {
+      window.clearTimeout(longPressRef.current.timeoutId);
+    }
+
+    longPressRef.current.guestId = guestId;
+    longPressRef.current.triggered = false;
+    longPressRef.current.timeoutId = window.setTimeout(() => {
+      toggleContactSelection(guestId);
+      longPressRef.current.triggered = true;
+      longPressRef.current.timeoutId = null;
+    }, 450);
+  };
+
+  const endContactLongPress = () => {
+    if (longPressRef.current.timeoutId) {
+      window.clearTimeout(longPressRef.current.timeoutId);
+      longPressRef.current.timeoutId = null;
+    }
+  };
+
+  const handleContactCardClick = (guest: any) => {
+    if (longPressRef.current.triggered && longPressRef.current.guestId === guest.id) {
+      longPressRef.current.triggered = false;
+      longPressRef.current.guestId = null;
+      return;
+    }
+
+    if (selectedContactIds.length > 0) {
+      toggleContactSelection(guest.id);
+    }
+  };
+
+  useEffect(() => {
+    const handleReturnFocus = () => {
+      const guestIdToFocus = pendingNextGuestId || sessionStorage.getItem('nextContactGuestId');
+      if (!guestIdToFocus) return;
+      focusGuidedContact(guestIdToFocus);
+    };
+
+    window.addEventListener('focus', handleReturnFocus);
+    return () => window.removeEventListener('focus', handleReturnFocus);
+  }, [pendingNextGuestId]);
+
+  useEffect(() => {
+    const guestIdToFocus = sessionStorage.getItem('nextContactGuestId');
+    if (!guestIdToFocus) return;
+
+    const timeoutId = window.setTimeout(() => {
+      focusGuidedContact(guestIdToFocus);
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [filteredGuests.length]);
+
+  useEffect(() => {
+    if (!guidedNextGuestId) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setGuidedNextGuestId(null);
+    }, 8000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [guidedNextGuestId]);
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <h1 className="text-4xl font-bold tracking-tight">Contacts & Invites</h1>
+        <div className="space-y-1">
+          <h1 className="text-4xl font-bold tracking-tight">Contacts & Messages</h1>
+          <p className="text-sm text-[#7b6858]">
+            {eventHasPassed
+              ? 'Thank-you messages are active now. Invite messages are shown in a muted state for reference.'
+              : 'Invite messages are active until the event date. Thank-you messages stay muted until then.'}
+          </p>
+        </div>
         <div className="flex flex-wrap gap-2 md:gap-3">
           <label className="apple-button bg-white border border-[#ebebeb] flex items-center gap-2 cursor-pointer hover:bg-surface text-xs md:text-sm px-3 md:px-6 py-2 md:py-3">
             <FileUp className="w-4 h-4" />
@@ -803,6 +915,38 @@ function InvitePage() {
           className="w-full bg-white border border-[#ebebeb] rounded-2xl pl-12 pr-4 py-4 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand transition-all"
         />
       </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#ebebeb] bg-white px-4 py-3">
+        <label className="flex items-center gap-3 text-sm font-medium text-[#4b2f20]">
+          <button
+            type="button"
+            onClick={toggleSelectAllContacts}
+            className={`flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
+              allFilteredContactsSelected
+                ? 'border-brand bg-brand text-white'
+                : 'border-[#d8c3aa] bg-white text-transparent hover:border-brand/60'
+            }`}
+            aria-label={allFilteredContactsSelected ? 'Deselect all contacts' : 'Select all contacts'}
+          >
+            <Check className="w-3 h-3" strokeWidth={3} />
+          </button>
+          <span>Select all</span>
+        </label>
+        <button
+          onClick={() => void deleteSelectedContacts()}
+          disabled={selectedContactIds.length === 0}
+          className="inline-flex items-center gap-2 rounded-xl bg-[#f8ebe7] px-4 py-2 text-sm font-semibold text-[#9b3d2f] transition-colors hover:bg-[#f3ddd7] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Trash2 className="w-4 h-4" />
+          <span>Delete selected</span>
+        </button>
+      </div>
+
+      {guidedNextGuestId && (
+        <div className="rounded-2xl border border-[#d7ead9] bg-[#f6fbf7] px-4 py-3 text-sm text-[#2f6c44] shadow-sm">
+          Next up: <span className="font-semibold">{filteredGuests.find((guest) => guest.id === guidedNextGuestId)?.name || 'Contact'}</span>
+        </div>
+      )}
 
       {isAdding && (
         <motion.div
@@ -835,20 +979,56 @@ function InvitePage() {
       
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {filteredGuests.map((guest) => (
-          <div key={guest.id} className="relative overflow-hidden rounded-[1.75rem] border border-[#eadfce] bg-gradient-to-br from-white via-[#fffaf4] to-[#f5ead9] p-4 md:p-5 shadow-[0_14px_28px_rgba(64,36,22,0.08)]">
+          (() => {
+            const canSendThankYou = eventHasPassed && guest.status === 'attending';
+            const isSingleSelected = selectedContactIds.length === 1 && selectedContactIds[0] === guest.id;
+            return (
+          <div
+            key={guest.id}
+            ref={(node) => {
+              contactCardRefs.current[guest.id] = node;
+            }}
+            className={`relative overflow-hidden rounded-[1.75rem] border p-4 md:p-5 shadow-[0_14px_28px_rgba(64,36,22,0.08)] transition-all ${
+              selectedContactIds.includes(guest.id)
+                ? 'border-[#d8a033] bg-gradient-to-br from-[#fff9ef] via-[#fff2db] to-[#f7e4be] ring-2 ring-[#d8a033]/35'
+                : guidedNextGuestId === guest.id
+                  ? 'border-[#7db87a] bg-gradient-to-br from-white via-[#fffaf4] to-[#f5ead9] ring-2 ring-[#7db87a]/35'
+                : 'border-[#eadfce] bg-gradient-to-br from-white via-[#fffaf4] to-[#f5ead9]'
+            }`}
+            onPointerDown={() => beginContactLongPress(guest.id)}
+            onPointerUp={endContactLongPress}
+            onPointerLeave={endContactLongPress}
+            onPointerCancel={endContactLongPress}
+          >
             <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-[#d8a033]/40 to-transparent" />
             <div>
               <div className="flex items-start gap-3 mb-3">
-                <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#f0debf] text-[#6a4430] text-sm font-bold shadow-sm">
-                  {guest.name
-                    .split(' ')
-                    .filter(Boolean)
-                    .slice(0, 2)
-                    .map((part: string) => part[0]?.toUpperCase())
-                    .join('')}
-                  {guest.status !== 'pending' ? (
+                <div
+                  className={`relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-sm font-bold shadow-sm ${
+                    selectedContactIds.includes(guest.id)
+                      ? 'bg-[#d8a033] text-white'
+                      : guidedNextGuestId === guest.id
+                        ? 'bg-[#7db87a] text-white'
+                      : 'bg-[#f0debf] text-[#6a4430]'
+                  }`}
+                >
+                  {selectedContactIds.includes(guest.id) ? (
+                    <Check className="w-5 h-5" strokeWidth={3} />
+                  ) : (
+                    guest.name
+                      .split(' ')
+                      .filter(Boolean)
+                      .slice(0, 2)
+                      .map((part: string) => part[0]?.toUpperCase())
+                      .join('')
+                  )}
+                  {guest.status === 'attending' ? (
                     <span className="absolute -right-1 -bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-[#2f8a4b] text-white ring-2 ring-[#fffaf4] shadow-sm">
                       <Check className="w-3 h-3" strokeWidth={2.5} />
+                    </span>
+                  ) : guest.status === 'declined' ? (
+                    <span className="absolute -right-1 -bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-[#8a3b2e] text-white ring-2 ring-[#fffaf4] shadow-sm">
+                      <X className="w-3 h-3" strokeWidth={2.5} />
                     </span>
                   ) : guest.invited ? (
                     <span className="absolute -right-1 -bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-white text-[#2f8a4b] ring-2 ring-[#fffaf4] shadow-sm">
@@ -856,7 +1036,12 @@ function InvitePage() {
                     </span>
                   ) : null}
                 </div>
-                <div className="min-w-0 flex-1 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => handleContactCardClick(guest)}
+                  className="min-w-0 flex-1 pt-0.5 text-left"
+                  aria-label={`Edit contact for ${guest.name}`}
+                >
                   {editingContactId === guest.id ? (
                     <div className="space-y-2">
                       <input
@@ -877,105 +1062,210 @@ function InvitePage() {
                       </div>
                     </div>
                   ) : (
-                    <>
+                    <div className="rounded-2xl px-1 py-1 transition-colors hover:bg-white/40">
                       <h3 className="text-[1.05rem] font-bold leading-tight text-[#2f1b12] truncate">{guest.name}</h3>
                       {guest.phone && <p className="text-xs text-[#7b6858] truncate mt-1">{formatDisplayUsPhoneNumber(guest.phone)}</p>}
-                    </>
+                    </div>
                   )}
-                </div>
+                </button>
+                {editingContactId === guest.id ? (
                 <div className="flex items-center gap-2 shrink-0 self-start">
                   <button
                     onClick={() => {
-                      if (editingContactId === guest.id) {
-                        void saveContact(guest.id);
-                      } else {
-                        startEditingContact(guest);
-                      }
+                      void saveContact(guest.id);
                     }}
                     className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shrink-0 shadow-sm"
-                    aria-label={editingContactId === guest.id ? `Save ${guest.name}` : `Edit contact for ${guest.name}`}
+                    aria-label={`Save ${guest.name}`}
                   >
-                    {editingContactId === guest.id ? <Check className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
+                    <Check className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={async () => {
-                      if (editingContactId === guest.id) {
-                        setEditingContactId(null);
-                        setEditingContactName('');
-                        setEditingContactPhone('');
-                        return;
-                      }
-                      if (!confirm(`Delete ${guest.name} from contacts?`)) return;
+                    onClick={() => {
+                      setEditingContactId(null);
+                      setEditingContactName('');
+                      setEditingContactPhone('');
+                    }}
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shrink-0 shadow-sm"
+                    aria-label="Cancel contact edit"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                ) : isSingleSelected ? (
+                <div className="flex items-center gap-2 shrink-0 self-start">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      startEditingContact(guest);
+                    }}
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shrink-0 shadow-sm"
+                    aria-label={`Edit ${guest.name}`}
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async (event) => {
+                      event.stopPropagation();
+                      if (!confirm(`Delete ${guest.name}? This cannot be undone.`)) return;
                       try {
                         await deleteDoc(doc(db, 'guests', guest.id));
+                        setSelectedContactIds([]);
                       } catch (error) {
                         handleFirestoreError(error, OperationType.DELETE, `guests/${guest.id}`);
                       }
                     }}
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shrink-0 shadow-sm"
-                    aria-label={editingContactId === guest.id ? 'Cancel contact edit' : `Delete ${guest.name}`}
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#ead2ca] text-[#9b3d2f] hover:text-[#7a2419] hover:bg-[#fff6f4] transition-colors shrink-0 shadow-sm"
+                    aria-label={`Delete ${guest.name}`}
                   >
-                    {editingContactId === guest.id ? <X className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
+                ) : null}
               </div>
               
-              {editingId === guest.id ? (
-                <div className="rounded-2xl bg-white/80 border border-[#efe3d3] p-3">
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">Invite Message</p>
-                    <button
-                      onClick={() => setEditingId(null)}
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-white border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shadow-sm"
-                      aria-label="Close message editor"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+              {editingMessage?.guestId === guest.id ? (
+                <div className="space-y-3">
+                  <div className={`rounded-2xl border p-3 ${editingMessage.type === 'invite' ? 'bg-white/90 border-[#e7d8c2]' : 'bg-white/60 border-[#efe3d3] opacity-65'}`}>
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">Invite Message</p>
+                      {editingMessage.type === 'invite' && (
+                        <button
+                          onClick={() => setEditingMessage(null)}
+                          className="flex h-8 w-8 items-center justify-center rounded-full bg-white border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shadow-sm"
+                          aria-label="Close message editor"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    {editingMessage.type === 'invite' ? (
+                      <textarea
+                        value={inviteMsgs[guest.id]}
+                        onChange={(e) => setInviteMsgs({ ...inviteMsgs, [guest.id]: e.target.value })}
+                        className="w-full text-sm bg-white/90 border border-[#e7d8c2] p-3 rounded-2xl min-h-[120px] focus:outline-none focus:ring-2 focus:ring-brand/20"
+                      />
+                    ) : (
+                      <p className="text-[11px] text-[#6b4b3a] line-clamp-2">
+                        {getMessagePreview(inviteMsgs[guest.id] || '') || 'Invite message available'}
+                      </p>
+                    )}
                   </div>
-                  <textarea 
-                    value={customMsgs[guest.id]}
-                    onChange={(e) => setCustomMsgs({ ...customMsgs, [guest.id]: e.target.value })}
-                    className="w-full text-sm bg-white/90 border border-[#e7d8c2] p-3 rounded-2xl min-h-[120px] focus:outline-none focus:ring-2 focus:ring-brand/20"
-                  />
+                  <div className={`rounded-2xl border p-3 ${editingMessage.type === 'thanks' ? 'bg-white/90 border-[#e7d8c2]' : 'bg-white/60 border-[#efe3d3] opacity-65'}`}>
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">Thank You Message</p>
+                      {editingMessage.type === 'thanks' && (
+                        <button
+                          onClick={() => setEditingMessage(null)}
+                          className="flex h-8 w-8 items-center justify-center rounded-full bg-white border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shadow-sm"
+                          aria-label="Close message editor"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    {editingMessage.type === 'thanks' ? (
+                      <textarea
+                        value={thankMsgs[guest.id]}
+                        onChange={(e) => setThankMsgs({ ...thankMsgs, [guest.id]: e.target.value })}
+                        className="w-full text-sm bg-white/90 border border-[#e7d8c2] p-3 rounded-2xl min-h-[120px] focus:outline-none focus:ring-2 focus:ring-brand/20"
+                      />
+                    ) : (
+                      <p className="text-[11px] text-[#6b4b3a] line-clamp-2">
+                        {getMessagePreview(thankMsgs[guest.id] || '') || 'Thank-you message available'}
+                      </p>
+                    )}
+                  </div>
                 </div>
               ) : (
-                <div className="mt-3 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingId(guest.id)}
-                    className="min-w-0 flex-1 rounded-2xl bg-white/70 border border-[#efe3d3] px-3 py-2.5 text-left transition-colors hover:bg-white/90 hover:text-[#3d281d]"
-                    aria-label={`Edit message for ${guest.name}`}
-                  >
-                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">Invite Message</p>
-                    <p className="mt-1 text-[11px] text-[#6b4b3a] line-clamp-1">
-                      {(() => {
-                        const previewLines = (customMsgs[guest.id] || '')
-                          .split('\n')
-                          .map((line) => line.trim())
-                          .filter(Boolean)
-                          .slice(0, 2);
-                        return previewLines.join(' ');
-                      })() || 'Invite message available'}
-                    </p>
-                  </button>
-                  <button 
-                    onClick={() => sendWhatsApp(guest)}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/90 border border-[#d7ead9] hover:bg-[#f6fbf7] transition-colors shadow-sm"
-                    aria-label={`Send WhatsApp invite to ${guest.name}`}
-                  >
-                    <img src="/whatsapp-logo.svg" alt="" className="w-5 h-5" />
-                  </button>
-                  <button 
-                    onClick={() => sendSMS(guest)}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] hover:bg-[#f7f7f7] transition-colors shadow-sm"
-                    aria-label={`Send Google Messages invite to ${guest.name}`}
-                  >
-                    <img src="/google-messages-logo.svg" alt="" className="w-5 h-5 rounded-full" />
-                  </button>
+                <div className="mt-3 space-y-2">
+                  <div className="flex items-stretch gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditingMessage({ guestId: guest.id, type: 'invite' })}
+                      className={`min-w-0 flex-1 rounded-2xl border px-3 py-2.5 text-left transition-colors ${
+                        eventHasPassed
+                          ? 'border-[#efe3d3] bg-white/55 text-[#9b8a78] opacity-60'
+                          : 'border-[#7db87a] bg-white/75 shadow-[0_0_0_1px_rgba(47,138,75,0.08)] hover:bg-white/90 hover:text-[#3d281d]'
+                      }`}
+                      aria-label={`Edit invite message for ${guest.name}`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">Invite Message</p>
+                        <p className="mt-1 text-[11px] text-[#6b4b3a] line-clamp-1">
+                          {getMessagePreview(inviteMsgs[guest.id] || '') || 'Invite message available'}
+                        </p>
+                      </div>
+                    </button>
+                    {!eventHasPassed && (
+                      <div className="flex shrink-0 items-center gap-2">
+                        <button 
+                          onClick={() => sendWhatsApp(guest)}
+                          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#d7ead9] hover:bg-[#f6fbf7] transition-colors shadow-sm"
+                          aria-label={`Send invite message via WhatsApp to ${guest.name}`}
+                        >
+                          <img src="/whatsapp-logo.svg" alt="" className="w-5 h-5" />
+                        </button>
+                        <button 
+                          onClick={() => sendSMS(guest)}
+                          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] hover:bg-[#f7f7f7] transition-colors shadow-sm"
+                          aria-label={`Send invite message via Google Messages to ${guest.name}`}
+                        >
+                          <img src="/google-messages-logo.svg" alt="" className="w-5 h-5 rounded-full" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-stretch gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (canSendThankYou) {
+                          setEditingMessage({ guestId: guest.id, type: 'thanks' });
+                        }
+                      }}
+                      disabled={!canSendThankYou}
+                      className={`min-w-0 flex-1 rounded-2xl border px-3 py-2.5 text-left transition-colors ${
+                        canSendThankYou
+                          ? 'border-[#7db87a] bg-white/75 shadow-[0_0_0_1px_rgba(47,138,75,0.08)] hover:bg-white/90 hover:text-[#3d281d]'
+                          : 'border-[#efe3d3] bg-white/55 text-[#9b8a78] opacity-60 cursor-not-allowed'
+                      }`}
+                      aria-label={`Edit thank you message for ${guest.name}`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">Thank You Message</p>
+                        <p className="mt-1 text-[11px] text-[#6b4b3a] line-clamp-1">
+                          {getMessagePreview(thankMsgs[guest.id] || '') || 'Thank-you message available'}
+                        </p>
+                      </div>
+                    </button>
+                    {canSendThankYou && (
+                      <div className="flex shrink-0 items-center gap-2">
+                        <button 
+                          onClick={() => sendWhatsApp(guest)}
+                          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#d7ead9] hover:bg-[#f6fbf7] transition-colors shadow-sm"
+                          aria-label={`Send thank you message via WhatsApp to ${guest.name}`}
+                        >
+                          <img src="/whatsapp-logo.svg" alt="" className="w-5 h-5" />
+                        </button>
+                        <button 
+                          onClick={() => sendSMS(guest)}
+                          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] hover:bg-[#f7f7f7] transition-colors shadow-sm"
+                          aria-label={`Send thank you message via Google Messages to ${guest.name}`}
+                        >
+                          <img src="/google-messages-logo.svg" alt="" className="w-5 h-5 rounded-full" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
           </div>
+            );
+          })()
         ))}
       </div>
     </div>
@@ -1149,143 +1439,6 @@ function SettingsPage() {
         >
           {isSaving ? 'Saving...' : 'Save All Settings'}
         </button>
-      </div>
-    </div>
-  );
-}
-
-function ThankYouPage() {
-  const [guests, setGuests] = useState<any[]>([]);
-  const { settings } = useSettings();
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [customMsgs, setCustomMsgs] = useState<Record<string, string>>({});
-
-  const formatUsPhoneNumber = (value: string) => {
-    const digits = value.replace(/\D/g, '').slice(0, 10);
-    if (digits.length <= 3) return digits;
-    if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-  };
-
-  const formatDisplayUsPhoneNumber = (value: string) => {
-    const digits = value.replace(/\D/g, '');
-    const localDigits = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
-    return localDigits ? `+1 ${formatUsPhoneNumber(localDigits)}` : '';
-  };
-
-  useEffect(() => {
-    const q = query(collection(db, 'guests'), orderBy('name'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const guestData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
-      setGuests(guestData);
-
-      const msgs: Record<string, string> = {};
-      guestData.forEach((g) => {
-        msgs[g.id] = `Hi ${g.name}!\n\nThank you so much for joining us for our Gruhapravesham. Your presence made the day even more special for us.\n\nWith love,\n${settings.hostName}`;
-      });
-      setCustomMsgs(msgs);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'guests');
-    });
-    return unsubscribe;
-  }, [settings.hostName]);
-
-  const attendingGuests = guests.filter(g => g.status === 'attending');
-
-  const sendThankYouWhatsApp = (guest: any) => {
-    const msg = encodeURIComponent(customMsgs[guest.id] || '');
-    const phone = guest.phone.replace(/\D/g, '');
-    window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
-  };
-
-  const sendThankYouSMS = (guest: any) => {
-    const msg = encodeURIComponent(customMsgs[guest.id] || '');
-    const phone = guest.phone.replace(/\D/g, '');
-    window.open(`sms:${phone}?body=${msg}`, '_blank');
-  };
-
-  return (
-    <div className="space-y-8">
-      <h1 className="text-4xl font-bold tracking-tight">Send Thank You Messages</h1>
-      <p className="text-[#717171]">Send gratitude to the {attendingGuests.length} guests who attended.</p>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-        {attendingGuests.map((guest) => (
-          <div key={guest.id} className="relative overflow-hidden rounded-[1.75rem] border border-[#eadfce] bg-gradient-to-br from-white via-[#fffaf4] to-[#f5ead9] p-4 md:p-5 shadow-[0_14px_28px_rgba(64,36,22,0.08)]">
-            <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-[#d8a033]/40 to-transparent" />
-            <div>
-              <div className="flex items-start gap-3 mb-3">
-                <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#f0debf] text-[#6a4430] text-sm font-bold shadow-sm">
-                  {guest.name
-                    .split(' ')
-                    .filter(Boolean)
-                    .slice(0, 2)
-                    .map((part: string) => part[0]?.toUpperCase())
-                    .join('')}
-                </div>
-                <div className="min-w-0 flex-1 pt-0.5">
-                  <h3 className="text-[1.05rem] font-bold leading-tight text-[#2f1b12] truncate">{guest.name}</h3>
-                  {guest.phone && <p className="text-xs text-[#7b6858] truncate mt-1">{formatDisplayUsPhoneNumber(guest.phone)}</p>}
-                </div>
-              </div>
-
-              {editingId === guest.id ? (
-                <div className="rounded-2xl bg-white/80 border border-[#efe3d3] p-3">
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">Thank You Message</p>
-                    <button
-                      onClick={() => setEditingId(null)}
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-white border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shadow-sm"
-                      aria-label="Close thank you editor"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <textarea
-                    value={customMsgs[guest.id]}
-                    onChange={(e) => setCustomMsgs({ ...customMsgs, [guest.id]: e.target.value })}
-                    className="w-full text-sm bg-white/90 border border-[#e7d8c2] p-3 rounded-2xl min-h-[120px] focus:outline-none focus:ring-2 focus:ring-brand/20"
-                  />
-                </div>
-              ) : (
-                <div className="mt-3 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingId(guest.id)}
-                    className="min-w-0 flex-1 rounded-2xl bg-white/70 border border-[#efe3d3] px-3 py-2.5 text-left transition-colors hover:bg-white/90 hover:text-[#3d281d]"
-                    aria-label={`Edit thank you message for ${guest.name}`}
-                  >
-                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">Thank You Message</p>
-                    <p className="mt-1 text-[11px] text-[#6b4b3a] line-clamp-1">
-                      {(() => {
-                        const previewLines = (customMsgs[guest.id] || '')
-                          .split('\n')
-                          .map((line) => line.trim())
-                          .filter(Boolean)
-                          .slice(0, 2);
-                        return previewLines.join(' ');
-                      })() || 'Thank you message available'}
-                    </p>
-                  </button>
-                  <button
-                    onClick={() => sendThankYouWhatsApp(guest)}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/90 border border-[#d7ead9] hover:bg-[#f6fbf7] transition-colors shadow-sm"
-                    aria-label={`Send thank you via WhatsApp to ${guest.name}`}
-                  >
-                    <img src="/whatsapp-logo.svg" alt="" className="w-5 h-5" />
-                  </button>
-                  <button
-                    onClick={() => sendThankYouSMS(guest)}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] hover:bg-[#f7f7f7] transition-colors shadow-sm"
-                    aria-label={`Send thank you via Google Messages to ${guest.name}`}
-                  >
-                    <img src="/google-messages-logo.svg" alt="" className="w-5 h-5 rounded-full" />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );
