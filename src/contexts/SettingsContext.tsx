@@ -34,7 +34,7 @@ const defaultSettings: Settings = {
   hostName: "Naveen & Priyanka",
   hostPhone: "6026427380",
   address: "8731 W Denton Ln, Glendale, AZ 85305",
-  coverPhotoUrl: "https://images.unsplash.com/photo-1518780664697-55e3ad937233?auto=format&fit=crop&q=80&w=1920"
+  coverPhotoUrl: ""
 };
 
 interface SettingsContextType {

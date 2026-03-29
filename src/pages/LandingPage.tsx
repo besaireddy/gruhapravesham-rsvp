@@ -8,6 +8,10 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { formatCalendarDate, formatDateForGoogleCalendar, parseConfiguredEventDate } from '../lib/eventUtils';
 import { findDuplicateGuestByName, formatDisplayUsPhoneNumber, normalizeGuestName, validateRsvpSubmission } from '../lib/guestUtils';
 
+const DEFAULT_COVER_PHOTO_URL = '/housewarming-cover.jpg';
+const LEGACY_COVER_PHOTO_URL = 'https://images.unsplash.com/photo-1518780664697-55e3ad937233?auto=format&fit=crop&q=80&w=1920';
+const DRIVE_COVER_PHOTO_URL = 'https://drive.google.com/uc?export=view&id=1pUZXNu9T9ZtFgEEO0rqK3MxfodW_Cvce';
+
 export default function LandingPage() {
   const { settings, loading } = useSettings();
   const [searchParams] = useSearchParams();
@@ -33,6 +37,13 @@ export default function LandingPage() {
   );
   const directionsUrl = useMemo(() => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(settings.address)}`, [settings.address]);
   const formattedPhone = useMemo(() => formatDisplayUsPhoneNumber(settings.hostPhone), [settings.hostPhone]);
+  const coverPhotoUrl = useMemo(() => {
+    const configuredUrl = settings.coverPhotoUrl?.trim();
+    if (!configuredUrl || configuredUrl === LEGACY_COVER_PHOTO_URL || configuredUrl === DRIVE_COVER_PHOTO_URL) {
+      return DEFAULT_COVER_PHOTO_URL;
+    }
+    return configuredUrl;
+  }, [settings.coverPhotoUrl]);
 
   useEffect(() => {
     if (guestId) {
@@ -158,7 +169,7 @@ export default function LandingPage() {
         <section id="welcome" className="relative">
           <div className="h-[40vh] md:h-[60vh] relative overflow-hidden">
             <img
-              src={settings.coverPhotoUrl || "/housewarming-cover.jpg"}
+              src={coverPhotoUrl}
               alt="Housewarming"
               className="w-full h-full object-cover object-[55%_center] scale-[1.02]"
               referrerPolicy="no-referrer"
