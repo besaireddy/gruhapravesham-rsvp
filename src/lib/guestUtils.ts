@@ -9,6 +9,8 @@ export interface GuestRecordLike {
   children?: number;
   message?: string;
   invited?: boolean;
+  reminded?: boolean;
+  thanked?: boolean;
   normalizedName?: string;
 }
 
@@ -50,6 +52,10 @@ export function buildInviteMessage(name: string, eventDate: string, hostName: st
 
 export function buildThankYouMessage(name: string, hostName: string) {
   return `Hi ${name}!\n\nThank you so much for joining us for our Gruhapravesham (Housewarming Ceremony). Your presence made the day even more special for us.\n\nWith love,\n${hostName}`;
+}
+
+export function buildReminderMessage(name: string, eventDate: string, hostName: string, guestId: string, origin: string) {
+  return `Dear ${name},\n\nOur Gruhapravesham (Housewarming Ceremony) is coming up on ${eventDate}, and we would be so happy to celebrate with you. If you have not had a chance to respond yet, please share your RSVP here:\n${origin}?guestId=${guestId}\n\nWith love,\n${hostName}`;
 }
 
 export function getMessagePreview(message: string) {

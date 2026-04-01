@@ -25,9 +25,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSettings, Settings } from '../contexts/SettingsContext';
 import { collection, onSnapshot, query, orderBy, deleteDoc, doc, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
-import { hasEventPassed } from '../lib/eventUtils';
+import { hasEventPassed, parseConfiguredEventDate } from '../lib/eventUtils';
 import {
   buildInviteMessage,
+  buildReminderMessage,
   buildThankYouMessage,
   formatDisplayUsPhoneNumber,
   formatEditableUsPhoneNumber,
@@ -173,9 +174,12 @@ function SidebarLink({ to, icon, label, active }: { to: string, icon: React.Reac
 }
 
 function Dashboard() {
+  const navigate = useNavigate();
   const [guests, setGuests] = useState<any[]>([]);
   const [selectedResponseIds, setSelectedResponseIds] = useState<string[]>([]);
   const [expandedResponseIds, setExpandedResponseIds] = useState<string[]>([]);
+  const [responseFilter, setResponseFilter] = useState<'all' | 'attending' | 'declined'>('all');
+  const responsesSectionRef = useRef<HTMLDivElement | null>(null);
   const longPressRef = useRef<{ timeoutId: number | null; guestId: string | null; triggered: boolean }>({
     timeoutId: null,
     guestId: null,
@@ -195,7 +199,13 @@ function Dashboard() {
   const stats = useMemo(() => getDashboardStats(guests), [guests]);
   const totalPeopleAttending = stats.totalPeopleAttending;
   const respondedGuests = useMemo(() => guests.filter(g => g.status !== 'pending'), [guests]);
-  const allResponsesSelected = respondedGuests.length > 0 && respondedGuests.every(g => selectedResponseIds.includes(g.id));
+  const filteredResponses = useMemo(() => {
+    if (responseFilter === 'all') {
+      return respondedGuests;
+    }
+    return respondedGuests.filter((guest) => guest.status === responseFilter);
+  }, [respondedGuests, responseFilter]);
+  const allResponsesSelected = filteredResponses.length > 0 && filteredResponses.every(g => selectedResponseIds.includes(g.id));
 
   const toggleResponseSelection = (guestId: string) => {
     setSelectedResponseIds((current) =>
@@ -205,10 +215,15 @@ function Dashboard() {
 
   const toggleSelectAllResponses = () => {
     if (allResponsesSelected) {
-      setSelectedResponseIds([]);
+      const filteredIds = new Set(filteredResponses.map((guest) => guest.id));
+      setSelectedResponseIds((current) => current.filter((id) => !filteredIds.has(id)));
       return;
     }
-    setSelectedResponseIds(respondedGuests.map((guest) => guest.id));
+    setSelectedResponseIds((current) => {
+      const next = new Set(current);
+      filteredResponses.forEach((guest) => next.add(guest.id));
+      return Array.from(next);
+    });
   };
 
   const deleteSelectedResponses = async () => {
@@ -320,6 +335,13 @@ function Dashboard() {
     }
   };
 
+  const focusResponses = (filter: 'all' | 'attending' | 'declined') => {
+    setResponseFilter(filter);
+    window.setTimeout(() => {
+      responsesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  };
+
   return (
     <div className="space-y-6 md:space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -355,16 +377,38 @@ function Dashboard() {
           icon="status"
           highlight={{ label: 'Total RSVPs', value: stats.total.toString() }}
           stats={[
-            { label: 'Attending', value: stats.attending.toString() },
-            { label: 'Declined', value: stats.declined.toString() },
-            { label: 'Pending', value: stats.pending.toString() }
+            { label: 'Attending', value: stats.attending.toString(), onClick: () => focusResponses('attending') },
+            { label: 'Declined', value: stats.declined.toString(), onClick: () => focusResponses('declined') },
+            { label: 'Pending', value: stats.pending.toString(), onClick: () => navigate('/admin/invites?filter=pending') }
           ]}
         />
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-6" ref={responsesSectionRef}>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <h3 className="text-xl font-bold">Responses</h3>
+          <div className="space-y-3">
+            <h3 className="text-xl font-bold">Responses</h3>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: 'all', label: `All Responses (${respondedGuests.length})` },
+                { value: 'attending', label: `Attending (${stats.attending})` },
+                { value: 'declined', label: `Declined (${stats.declined})` }
+              ].map((filter) => (
+                <button
+                  key={filter.value}
+                  type="button"
+                  onClick={() => setResponseFilter(filter.value as 'all' | 'attending' | 'declined')}
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    responseFilter === filter.value
+                      ? 'bg-[#222222] text-white'
+                      : 'bg-[#fff8ee] text-[#7a5035] border border-[#e7c485]/40 hover:bg-[#f8ead0]'
+                  }`}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex items-center gap-3">
             <label className="inline-flex items-center gap-3 text-sm font-medium text-[#6b4b3a]">
               <button
@@ -393,7 +437,7 @@ function Dashboard() {
           </div>
         </div>
         <div className="space-y-4">
-          {respondedGuests.map((guest) => (
+          {filteredResponses.map((guest) => (
             <div
               key={guest.id}
               className={`relative overflow-hidden rounded-[1.75rem] border p-5 shadow-[0_14px_28px_rgba(64,36,22,0.08)] transition-all ${
@@ -510,7 +554,7 @@ function SnapshotCard({
   badge: string,
   icon: 'people' | 'status',
   highlight?: { label: string, value: string },
-  stats: { label: string, value: string }[]
+  stats: { label: string, value: string, onClick?: () => void }[]
 }) {
   const isPeople = icon === 'people';
   const isStatus = icon === 'status';
@@ -563,10 +607,18 @@ function SnapshotCard({
             </div>
           )}
           {stats.map((stat, index) => (
-            <div key={stat.label} className={index < stats.length - 1 ? 'pb-3 md:pb-5 border-b border-[#ece7df]' : ''}>
+            <button
+              key={stat.label}
+              type="button"
+              onClick={stat.onClick}
+              disabled={!stat.onClick}
+              className={`w-full text-center ${index < stats.length - 1 ? 'pb-3 md:pb-5 border-b border-[#ece7df]' : ''} ${
+                stat.onClick ? 'transition-colors hover:text-[#7a5035] cursor-pointer' : 'cursor-default'
+              }`}
+            >
               <p className="text-2xl md:text-4xl font-bold tracking-tight text-[#2f2f2f]">{stat.value}</p>
               <p className="mt-1 text-xs md:text-base text-[#555555] font-medium leading-snug">{stat.label}</p>
-            </div>
+            </button>
           ))}
         </div>
       </div>
@@ -575,16 +627,19 @@ function SnapshotCard({
 }
 
 function InvitePage() {
+  const location = useLocation();
   const [guests, setGuests] = useState<any[]>([]);
   const { settings } = useSettings();
-  const [editingMessage, setEditingMessage] = useState<{ guestId: string; type: 'invite' | 'thanks' } | null>(null);
+  const [editingMessage, setEditingMessage] = useState<{ guestId: string; type: 'invite' | 'reminder' | 'thanks' } | null>(null);
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
   const [editingContactName, setEditingContactName] = useState('');
   const [editingContactPhone, setEditingContactPhone] = useState('');
   const [inviteMsgs, setInviteMsgs] = useState<Record<string, string>>({});
+  const [reminderMsgs, setReminderMsgs] = useState<Record<string, string>>({});
   const [thankMsgs, setThankMsgs] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
+  const [contactFilter, setContactFilter] = useState<'all' | 'ready' | 'sent' | 'pending' | 'responded'>('all');
   const [isAdding, setIsAdding] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
@@ -599,7 +654,32 @@ function InvitePage() {
 
   const deferredSearch = useDeferredValue(search);
   const eventHasPassed = useMemo(() => hasEventPassed(settings.eventDate), [settings.eventDate]);
-  const activeMessageType: 'invite' | 'thanks' = eventHasPassed ? 'thanks' : 'invite';
+  const reminderUnlocked = useMemo(() => {
+    const eventDate = parseConfiguredEventDate(settings.eventDate);
+    const unlockDate = new Date(eventDate.getFullYear(), 3, 10, 0, 0, 0, 0);
+    return new Date() >= unlockDate;
+  }, [settings.eventDate]);
+  const reminderAvailableLabel = useMemo(() => {
+    const eventDate = parseConfiguredEventDate(settings.eventDate);
+    return new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric' }).format(
+      new Date(eventDate.getFullYear(), 3, 10, 0, 0, 0, 0)
+    );
+  }, [settings.eventDate]);
+  const thankYouAvailableLabel = useMemo(() => {
+    return new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric' }).format(
+      parseConfiguredEventDate(settings.eventDate)
+    );
+  }, [settings.eventDate]);
+  const inviteReadyCount = useMemo(() => guests.filter((guest) => !guest.invited).length, [guests]);
+  const inviteSentCount = useMemo(() => guests.filter((guest) => Boolean(guest.invited)).length, [guests]);
+  const thankReadyCount = useMemo(
+    () => guests.filter((guest) => guest.status === 'attending' && !guest.thanked).length,
+    [guests]
+  );
+  const thankedCount = useMemo(
+    () => guests.filter((guest) => guest.status === 'attending' && Boolean(guest.thanked)).length,
+    [guests]
+  );
 
   useEffect(() => {
     const q = query(collection(db, 'guests'), orderBy('name'));
@@ -608,24 +688,49 @@ function InvitePage() {
       setGuests(guestData);
       
       const nextInviteMsgs: Record<string, string> = {};
+      const nextReminderMsgs: Record<string, string> = {};
       const nextThankMsgs: Record<string, string> = {};
       guestData.forEach(g => {
         nextInviteMsgs[g.id] = inviteMsgs[g.id] || buildInviteMessage(g.name, settings.eventDate, settings.hostName, g.id, window.location.origin);
+        nextReminderMsgs[g.id] = reminderMsgs[g.id] || buildReminderMessage(g.name, settings.eventDate, settings.hostName, g.id, window.location.origin);
         nextThankMsgs[g.id] = thankMsgs[g.id] || buildThankYouMessage(g.name, settings.hostName);
       });
       setInviteMsgs(nextInviteMsgs);
+      setReminderMsgs(nextReminderMsgs);
       setThankMsgs(nextThankMsgs);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'guests');
     });
     return unsubscribe;
-  }, [inviteMsgs, settings.eventDate, settings.hostName, thankMsgs]);
+  }, [inviteMsgs, reminderMsgs, settings.eventDate, settings.hostName, thankMsgs]);
 
   const filteredGuests = useMemo(
-    () => guests.filter((guest) => matchesGuestSearch(guest, deferredSearch)),
-    [deferredSearch, guests]
+    () => guests.filter((guest) => {
+      if (!matchesGuestSearch(guest, deferredSearch)) {
+        return false;
+      }
+      if (contactFilter === 'pending') {
+        return guest.status === 'pending' && guest.invited;
+      }
+      if (contactFilter === 'responded') {
+        return guest.status === 'attending' || guest.status === 'declined';
+      }
+      if (contactFilter === 'ready') {
+        return eventHasPassed
+          ? guest.status === 'attending' && !guest.thanked
+          : !guest.invited;
+      }
+      if (contactFilter === 'sent') {
+        return eventHasPassed
+          ? guest.status === 'attending' && Boolean(guest.thanked)
+          : Boolean(guest.invited);
+      }
+      return true;
+    }),
+    [contactFilter, deferredSearch, eventHasPassed, guests]
   );
   const allFilteredContactsSelected = filteredGuests.length > 0 && filteredGuests.every((guest) => selectedContactIds.includes(guest.id));
+  const selectedVisibleCount = filteredGuests.filter((guest) => selectedContactIds.includes(guest.id)).length;
 
   const handleAddGuest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -713,8 +818,28 @@ function InvitePage() {
     }
   };
 
+  const getActiveMessageType = (guest: any): 'invite' | 'reminder' | 'thanks' | null => {
+    if (eventHasPassed) {
+      return guest.status === 'attending' ? 'thanks' : null;
+    }
+
+    if (reminderUnlocked && guest.status === 'pending' && guest.invited) {
+      return 'reminder';
+    }
+
+    return 'invite';
+  };
+
+  const getMessageForGuest = (guest: any, type: 'invite' | 'reminder' | 'thanks') => {
+    if (type === 'invite') return inviteMsgs[guest.id] || '';
+    if (type === 'reminder') return reminderMsgs[guest.id] || '';
+    return thankMsgs[guest.id] || '';
+  };
+
   const sendWhatsApp = (guest: any) => {
-    const msg = encodeURIComponent(activeMessageType === 'invite' ? inviteMsgs[guest.id] || '' : thankMsgs[guest.id] || '');
+    const activeMessageType = getActiveMessageType(guest);
+    if (!activeMessageType) return;
+    const msg = encodeURIComponent(getMessageForGuest(guest, activeMessageType));
     const phone = guest.phone.replace(/\D/g, '');
     queueNextContactAfterSend(guest.id);
     window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
@@ -724,17 +849,43 @@ function InvitePage() {
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `guests/${guest.id}`);
       }
+    } else if (activeMessageType === 'reminder') {
+      try {
+        updateDoc(doc(db, 'guests', guest.id), { reminded: true });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `guests/${guest.id}`);
+      }
+    } else if (activeMessageType === 'thanks') {
+      try {
+        updateDoc(doc(db, 'guests', guest.id), { thanked: true });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `guests/${guest.id}`);
+      }
     }
   };
 
   const sendSMS = (guest: any) => {
-    const msg = encodeURIComponent(activeMessageType === 'invite' ? inviteMsgs[guest.id] || '' : thankMsgs[guest.id] || '');
+    const activeMessageType = getActiveMessageType(guest);
+    if (!activeMessageType) return;
+    const msg = encodeURIComponent(getMessageForGuest(guest, activeMessageType));
     const phone = guest.phone.replace(/\D/g, '');
     queueNextContactAfterSend(guest.id);
     window.open(`sms:${phone}?body=${msg}`, '_blank');
     if (activeMessageType === 'invite') {
       try {
         updateDoc(doc(db, 'guests', guest.id), { invited: true });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `guests/${guest.id}`);
+      }
+    } else if (activeMessageType === 'reminder') {
+      try {
+        updateDoc(doc(db, 'guests', guest.id), { reminded: true });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `guests/${guest.id}`);
+      }
+    } else if (activeMessageType === 'thanks') {
+      try {
+        updateDoc(doc(db, 'guests', guest.id), { thanked: true });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `guests/${guest.id}`);
       }
@@ -876,6 +1027,20 @@ function InvitePage() {
     return () => window.clearTimeout(timeoutId);
   }, [guidedNextGuestId]);
 
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const requestedFilter = searchParams.get('filter');
+
+    if (requestedFilter === 'pending') {
+      setContactFilter('pending');
+      return;
+    }
+
+    if (requestedFilter === 'ready' || requestedFilter === 'sent' || requestedFilter === 'all' || requestedFilter === 'responded') {
+      setContactFilter(requestedFilter);
+    }
+  }, [location.search]);
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -883,8 +1048,10 @@ function InvitePage() {
           <h1 className="text-4xl font-bold tracking-tight">Contacts & Messages</h1>
           <p className="text-sm text-[#7b6858]">
             {eventHasPassed
-              ? 'Thank-you messages are active now. Invite messages are shown in a muted state for reference.'
-              : 'Invite messages are active until the event date. Thank-you messages stay muted until then.'}
+              ? 'Thank-you messages are active now. Invite and reminder messages are shown in a muted state for reference.'
+              : reminderUnlocked
+                ? 'Reminder messages are active now for pending invited guests. Invite and thank-you messages are shown as reference.'
+                : 'Invite messages are active now. Reminder messages unlock on April 10, and thank-you messages unlock after the event.'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 md:gap-3">
@@ -916,7 +1083,41 @@ function InvitePage() {
         />
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#ebebeb] bg-white px-4 py-3">
+      <div>
+        <div className="flex flex-wrap gap-2">
+          {(
+            eventHasPassed
+              ? [
+                  { value: 'all', label: `All Contacts (${guests.length})` },
+                  { value: 'pending', label: `Pending (${guests.filter((guest) => guest.status === 'pending' && guest.invited).length})` },
+                  { value: 'responded', label: `Responded (${guests.filter((guest) => guest.status === 'attending' || guest.status === 'declined').length})` },
+                  { value: 'ready', label: `Thank You (${thankReadyCount})` },
+                  { value: 'sent', label: `Thanked (${thankedCount})` }
+                ]
+              : [
+                  { value: 'all', label: `All Contacts (${guests.length})` },
+                  { value: 'pending', label: `Pending RSVP (${guests.filter((guest) => guest.status === 'pending' && guest.invited).length})` },
+                  { value: 'responded', label: `Responded (${guests.filter((guest) => guest.status === 'attending' || guest.status === 'declined').length})` },
+                  { value: 'ready', label: `Pending Invite (${inviteReadyCount})` },
+                  { value: 'sent', label: `Invited (${inviteSentCount})` }
+                ]
+          ).map((filter) => (
+            <button
+              key={filter.value}
+              type="button"
+              onClick={() => setContactFilter(filter.value as 'all' | 'ready' | 'sent' | 'pending' | 'responded')}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+                contactFilter === filter.value
+                  ? 'bg-[#222222] text-white'
+                  : 'border border-[#e7c485]/40 bg-[#fff8ee] text-[#7a5035] hover:bg-[#f8ead0]'
+              }`}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-4">
         <label className="flex items-center gap-3 text-sm font-medium text-[#4b2f20]">
           <button
             type="button"
@@ -938,8 +1139,11 @@ function InvitePage() {
           className="inline-flex items-center gap-2 rounded-xl bg-[#f8ebe7] px-4 py-2 text-sm font-semibold text-[#9b3d2f] transition-colors hover:bg-[#f3ddd7] disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Trash2 className="w-4 h-4" />
-          <span>Delete selected</span>
+          <span>
+            Delete {selectedContactIds.length > 0 ? (selectedVisibleCount > 0 ? selectedVisibleCount : selectedContactIds.length) : ''} selected
+          </span>
         </button>
+      </div>
       </div>
 
       {guidedNextGuestId && (
@@ -980,7 +1184,10 @@ function InvitePage() {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {filteredGuests.map((guest) => (
           (() => {
+            const canSendReminder = reminderUnlocked && !eventHasPassed && guest.status === 'pending' && guest.invited;
             const canSendThankYou = eventHasPassed && guest.status === 'attending';
+            const activeMessageType = getActiveMessageType(guest);
+            const showReminderMessage = guest.status === 'pending';
             const isSingleSelected = selectedContactIds.length === 1 && selectedContactIds[0] === guest.id;
             return (
           <div
@@ -988,7 +1195,7 @@ function InvitePage() {
             ref={(node) => {
               contactCardRefs.current[guest.id] = node;
             }}
-            className={`relative overflow-hidden rounded-[1.75rem] border p-4 md:p-5 shadow-[0_14px_28px_rgba(64,36,22,0.08)] transition-all ${
+            className={`relative overflow-hidden rounded-[1.35rem] border p-3 md:rounded-[1.75rem] md:p-5 shadow-[0_14px_28px_rgba(64,36,22,0.08)] transition-all ${
               selectedContactIds.includes(guest.id)
                 ? 'border-[#d8a033] bg-gradient-to-br from-[#fff9ef] via-[#fff2db] to-[#f7e4be] ring-2 ring-[#d8a033]/35'
                 : guidedNextGuestId === guest.id
@@ -1000,11 +1207,11 @@ function InvitePage() {
             onPointerLeave={endContactLongPress}
             onPointerCancel={endContactLongPress}
           >
-            <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-[#d8a033]/40 to-transparent" />
+            <div className="absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-[#d8a033]/40 to-transparent md:inset-x-6" />
             <div>
-              <div className="flex items-start gap-3 mb-3">
+              <div className="mb-2.5 flex items-start gap-2.5 md:mb-3 md:gap-3">
                 <div
-                  className={`relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-sm font-bold shadow-sm ${
+                  className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold shadow-sm md:h-12 md:w-12 md:text-sm ${
                     selectedContactIds.includes(guest.id)
                       ? 'bg-[#d8a033] text-white'
                       : guidedNextGuestId === guest.id
@@ -1023,15 +1230,15 @@ function InvitePage() {
                       .join('')
                   )}
                   {guest.status === 'attending' ? (
-                    <span className="absolute -right-1 -bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-[#2f8a4b] text-white ring-2 ring-[#fffaf4] shadow-sm">
+                    <span className="absolute -right-1 -bottom-1 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-[#2f8a4b] text-white ring-2 ring-[#fffaf4] shadow-sm md:h-5 md:w-5">
                       <Check className="w-3 h-3" strokeWidth={2.5} />
                     </span>
                   ) : guest.status === 'declined' ? (
-                    <span className="absolute -right-1 -bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-[#8a3b2e] text-white ring-2 ring-[#fffaf4] shadow-sm">
+                    <span className="absolute -right-1 -bottom-1 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-[#8a3b2e] text-white ring-2 ring-[#fffaf4] shadow-sm md:h-5 md:w-5">
                       <X className="w-3 h-3" strokeWidth={2.5} />
                     </span>
                   ) : guest.invited ? (
-                    <span className="absolute -right-1 -bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-white text-[#2f8a4b] ring-2 ring-[#fffaf4] shadow-sm">
+                    <span className="absolute -right-1 -bottom-1 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-white text-[#2f8a4b] ring-2 ring-[#fffaf4] shadow-sm md:h-5 md:w-5">
                       <Check className="w-3 h-3" strokeWidth={2.5} />
                     </span>
                   ) : null}
@@ -1062,19 +1269,19 @@ function InvitePage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="rounded-2xl px-1 py-1 transition-colors hover:bg-white/40">
-                      <h3 className="text-[1.05rem] font-bold leading-tight text-[#2f1b12] truncate">{guest.name}</h3>
-                      {guest.phone && <p className="text-xs text-[#7b6858] truncate mt-1">{formatDisplayUsPhoneNumber(guest.phone)}</p>}
+                    <div className="rounded-2xl px-1 py-0.5 transition-colors hover:bg-white/40">
+                      <h3 className="truncate text-base font-bold leading-tight text-[#2f1b12] md:text-[1.05rem]">{guest.name}</h3>
+                      {guest.phone && <p className="mt-0.5 truncate text-[11px] text-[#7b6858] md:mt-1 md:text-xs">{formatDisplayUsPhoneNumber(guest.phone)}</p>}
                     </div>
                   )}
                 </button>
                 {editingContactId === guest.id ? (
-                <div className="flex items-center gap-2 shrink-0 self-start">
+                <div className="flex items-center gap-1.5 shrink-0 self-start md:gap-2">
                   <button
                     onClick={() => {
                       void saveContact(guest.id);
                     }}
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shrink-0 shadow-sm"
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shrink-0 shadow-sm md:h-10 md:w-10"
                     aria-label={`Save ${guest.name}`}
                   >
                     <Check className="w-4 h-4" />
@@ -1085,21 +1292,21 @@ function InvitePage() {
                       setEditingContactName('');
                       setEditingContactPhone('');
                     }}
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shrink-0 shadow-sm"
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shrink-0 shadow-sm md:h-10 md:w-10"
                     aria-label="Cancel contact edit"
                   >
                     <X className="w-4 h-4" />
                   </button>
                 </div>
                 ) : isSingleSelected ? (
-                <div className="flex items-center gap-2 shrink-0 self-start">
+                <div className="flex items-center gap-1.5 shrink-0 self-start md:gap-2">
                   <button
                     type="button"
                     onClick={(event) => {
                       event.stopPropagation();
                       startEditingContact(guest);
                     }}
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shrink-0 shadow-sm"
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shrink-0 shadow-sm md:h-10 md:w-10"
                     aria-label={`Edit ${guest.name}`}
                   >
                     <Edit2 className="w-4 h-4" />
@@ -1116,7 +1323,7 @@ function InvitePage() {
                         handleFirestoreError(error, OperationType.DELETE, `guests/${guest.id}`);
                       }
                     }}
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#ead2ca] text-[#9b3d2f] hover:text-[#7a2419] hover:bg-[#fff6f4] transition-colors shrink-0 shadow-sm"
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 border border-[#ead2ca] text-[#9b3d2f] hover:text-[#7a2419] hover:bg-[#fff6f4] transition-colors shrink-0 shadow-sm md:h-10 md:w-10"
                     aria-label={`Delete ${guest.name}`}
                   >
                     <Trash2 className="w-4 h-4" />
@@ -1152,9 +1359,42 @@ function InvitePage() {
                       </p>
                     )}
                   </div>
+                  {showReminderMessage && (
+                    <div className={`rounded-2xl border p-3 ${editingMessage.type === 'reminder' ? 'bg-white/90 border-[#e7d8c2]' : 'bg-white/60 border-[#efe3d3] opacity-65'}`}>
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">
+                          Reminder Message
+                          <span className="ml-1 normal-case tracking-normal text-[#b08d6d]">(from {reminderAvailableLabel})</span>
+                        </p>
+                        {editingMessage.type === 'reminder' && (
+                          <button
+                            onClick={() => setEditingMessage(null)}
+                            className="flex h-8 w-8 items-center justify-center rounded-full bg-white border border-[#e5d8c7] text-[#7a6655] hover:text-[#3d281d] hover:bg-[#fffdf9] transition-colors shadow-sm"
+                            aria-label="Close message editor"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                      {editingMessage.type === 'reminder' ? (
+                        <textarea
+                          value={reminderMsgs[guest.id]}
+                          onChange={(e) => setReminderMsgs({ ...reminderMsgs, [guest.id]: e.target.value })}
+                          className="w-full text-sm bg-white/90 border border-[#e7d8c2] p-3 rounded-2xl min-h-[120px] focus:outline-none focus:ring-2 focus:ring-brand/20"
+                        />
+                      ) : (
+                        <p className="text-[11px] text-[#6b4b3a] line-clamp-2">
+                          {getMessagePreview(reminderMsgs[guest.id] || '') || 'Reminder message available'}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   <div className={`rounded-2xl border p-3 ${editingMessage.type === 'thanks' ? 'bg-white/90 border-[#e7d8c2]' : 'bg-white/60 border-[#efe3d3] opacity-65'}`}>
                     <div className="mb-2 flex items-center justify-between gap-3">
-                      <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">Thank You Message</p>
+                      <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">
+                        Thank You Message
+                        <span className="ml-1 normal-case tracking-normal text-[#b08d6d]">(after {thankYouAvailableLabel})</span>
+                      </p>
                       {editingMessage.type === 'thanks' && (
                         <button
                           onClick={() => setEditingMessage(null)}
@@ -1179,37 +1419,44 @@ function InvitePage() {
                   </div>
                 </div>
               ) : (
-                <div className="mt-3 space-y-2">
-                  <div className="flex items-stretch gap-2">
+                <div className="mt-2.5 space-y-1.5 md:mt-3 md:space-y-2">
+                  <div className="flex items-stretch gap-1.5 md:gap-2">
                     <button
                       type="button"
-                      onClick={() => setEditingMessage({ guestId: guest.id, type: 'invite' })}
+                      onClick={() => {
+                        if (activeMessageType === 'invite') {
+                          setEditingMessage({ guestId: guest.id, type: 'invite' });
+                        }
+                      }}
                       className={`min-w-0 flex-1 rounded-2xl border px-3 py-2.5 text-left transition-colors ${
-                        eventHasPassed
-                          ? 'border-[#efe3d3] bg-white/55 text-[#9b8a78] opacity-60'
-                          : 'border-[#7db87a] bg-white/75 shadow-[0_0_0_1px_rgba(47,138,75,0.08)] hover:bg-white/90 hover:text-[#3d281d]'
+                        activeMessageType === 'invite'
+                          ? 'border-[#7db87a] bg-white/75 shadow-[0_0_0_1px_rgba(47,138,75,0.08)] hover:bg-white/90 hover:text-[#3d281d]'
+                          : 'border-[#efe3d3] bg-white/55 text-[#9b8a78] opacity-60 cursor-not-allowed'
                       }`}
+                      disabled={activeMessageType !== 'invite'}
                       aria-label={`Edit invite message for ${guest.name}`}
                     >
                       <div className="min-w-0">
                         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">Invite Message</p>
-                        <p className="mt-1 text-[11px] text-[#6b4b3a] line-clamp-1">
-                          {getMessagePreview(inviteMsgs[guest.id] || '') || 'Invite message available'}
-                        </p>
+                        {activeMessageType === 'invite' && (
+                          <p className="mt-0.5 text-[11px] text-[#6b4b3a] line-clamp-1">
+                            {getMessagePreview(inviteMsgs[guest.id] || '') || 'Invite message available'}
+                          </p>
+                        )}
                       </div>
                     </button>
-                    {!eventHasPassed && (
-                      <div className="flex shrink-0 items-center gap-2">
+                    {activeMessageType === 'invite' && (
+                      <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
                         <button 
                           onClick={() => sendWhatsApp(guest)}
-                          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#d7ead9] hover:bg-[#f6fbf7] transition-colors shadow-sm"
+                          className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 border border-[#d7ead9] hover:bg-[#f6fbf7] transition-colors shadow-sm md:h-10 md:w-10"
                           aria-label={`Send invite message via WhatsApp to ${guest.name}`}
                         >
                           <img src="/whatsapp-logo.svg" alt="" className="w-5 h-5" />
                         </button>
                         <button 
                           onClick={() => sendSMS(guest)}
-                          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] hover:bg-[#f7f7f7] transition-colors shadow-sm"
+                          className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] hover:bg-[#f7f7f7] transition-colors shadow-sm md:h-10 md:w-10"
                           aria-label={`Send invite message via Google Messages to ${guest.name}`}
                         >
                           <img src="/google-messages-logo.svg" alt="" className="w-5 h-5 rounded-full" />
@@ -1218,7 +1465,57 @@ function InvitePage() {
                     )}
                   </div>
 
-                  <div className="flex items-stretch gap-2">
+                  {showReminderMessage && (
+                    <div className="flex items-stretch gap-1.5 md:gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (canSendReminder) {
+                            setEditingMessage({ guestId: guest.id, type: 'reminder' });
+                          }
+                        }}
+                        disabled={!canSendReminder}
+                        className={`min-w-0 flex-1 rounded-2xl border px-3 py-2.5 text-left transition-colors ${
+                          canSendReminder
+                            ? 'border-[#7db87a] bg-white/75 shadow-[0_0_0_1px_rgba(47,138,75,0.08)] hover:bg-white/90 hover:text-[#3d281d]'
+                            : 'border-[#efe3d3] bg-white/55 text-[#9b8a78] opacity-60 cursor-not-allowed'
+                        }`}
+                        aria-label={`Edit reminder message for ${guest.name}`}
+                      >
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">
+                            Reminder Message
+                            <span className="ml-1 normal-case tracking-normal text-[#b08d6d]">(from {reminderAvailableLabel})</span>
+                          </p>
+                          {canSendReminder && (
+                            <p className="mt-0.5 text-[11px] text-[#6b4b3a] line-clamp-1">
+                              {getMessagePreview(reminderMsgs[guest.id] || '') || 'Reminder message available'}
+                            </p>
+                          )}
+                        </div>
+                      </button>
+                      {canSendReminder && (
+                        <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
+                          <button 
+                            onClick={() => sendWhatsApp(guest)}
+                            className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 border border-[#d7ead9] hover:bg-[#f6fbf7] transition-colors shadow-sm md:h-10 md:w-10"
+                            aria-label={`Send reminder message via WhatsApp to ${guest.name}`}
+                          >
+                            <img src="/whatsapp-logo.svg" alt="" className="w-5 h-5" />
+                          </button>
+                          <button 
+                            onClick={() => sendSMS(guest)}
+                            className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] hover:bg-[#f7f7f7] transition-colors shadow-sm md:h-10 md:w-10"
+                            aria-label={`Send reminder message via Google Messages to ${guest.name}`}
+                          >
+                            <img src="/google-messages-logo.svg" alt="" className="w-5 h-5 rounded-full" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex items-stretch gap-1.5 md:gap-2">
                     <button
                       type="button"
                       onClick={() => {
@@ -1235,24 +1532,29 @@ function InvitePage() {
                       aria-label={`Edit thank you message for ${guest.name}`}
                     >
                       <div className="min-w-0">
-                        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">Thank You Message</p>
-                        <p className="mt-1 text-[11px] text-[#6b4b3a] line-clamp-1">
-                          {getMessagePreview(thankMsgs[guest.id] || '') || 'Thank-you message available'}
+                        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#a3876a]">
+                          Thank You Message
+                          <span className="ml-1 normal-case tracking-normal text-[#b08d6d]">(after {thankYouAvailableLabel})</span>
                         </p>
+                        {canSendThankYou && (
+                          <p className="mt-0.5 text-[11px] text-[#6b4b3a] line-clamp-1">
+                            {getMessagePreview(thankMsgs[guest.id] || '') || 'Thank-you message available'}
+                          </p>
+                        )}
                       </div>
                     </button>
                     {canSendThankYou && (
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
                         <button 
                           onClick={() => sendWhatsApp(guest)}
-                          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#d7ead9] hover:bg-[#f6fbf7] transition-colors shadow-sm"
+                          className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 border border-[#d7ead9] hover:bg-[#f6fbf7] transition-colors shadow-sm md:h-10 md:w-10"
                           aria-label={`Send thank you message via WhatsApp to ${guest.name}`}
                         >
                           <img src="/whatsapp-logo.svg" alt="" className="w-5 h-5" />
                         </button>
                         <button 
                           onClick={() => sendSMS(guest)}
-                          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] hover:bg-[#f7f7f7] transition-colors shadow-sm"
+                          className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90 border border-[#e5d8c7] hover:bg-[#f7f7f7] transition-colors shadow-sm md:h-10 md:w-10"
                           aria-label={`Send thank you message via Google Messages to ${guest.name}`}
                         >
                           <img src="/google-messages-logo.svg" alt="" className="w-5 h-5 rounded-full" />
